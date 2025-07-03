@@ -1,0 +1,193 @@
+#include "handlers.h"
+#include "context.h"
+#include "json_helper.h"
+
+typedef struct
+{
+    Res *res;
+    bool is_author;
+} ctx_t;
+
+static void free_ctx(ctx_t *ctx)
+{
+    if (!ctx)
+        return;
+
+    if (ctx->res)
+        free(ctx->res);
+
+    free(ctx);
+}
+
+static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data);
+
+void get_all_posts(Req *req, Res *res)
+{
+    auth_context_t *auth_ctx = get_context(req);
+
+    // Create context to pass to callback
+    ctx_t *ctx = calloc(1, sizeof(ctx_t));
+    if (!ctx)
+    {
+        send_text(500, "Memory allocation failed");
+        return;
+    }
+
+    ctx->res = malloc(sizeof(*ctx->res));
+
+    if (!ctx->res)
+    {
+        send_text(500, "Memory allocation failed");
+        free_ctx(ctx);
+        return;
+    }
+
+    *ctx->res = *res;
+    ctx->is_author = auth_ctx->is_author;
+
+    // Create async PostgreSQL context
+    pg_async_t *pg = pquv_create(db, ctx);
+    if (!pg)
+    {
+        printf("get_all_posts: Failed to create async context\n");
+        send_text(500, "Failed to create async context");
+        free(ctx);
+        return;
+    }
+
+    char *sql;
+
+    if (auth_ctx->is_author)
+    {
+        sql =
+            "SELECT p.id, p.header, p.slug, p.content, p.reading_time, "
+            "       p.author_id, u.username, p.created_at, p.updated_at, p.is_hidden, "
+            "       COALESCE(string_agg(c.category, ','), '') as categories, "
+            "       COALESCE(string_agg(c.slug, ','), '') as category_slugs, "
+            "       COALESCE(string_agg(c.id::text, ','), '') as category_ids "
+            "FROM posts p "
+            "JOIN users u ON p.author_id = u.id "
+            "LEFT JOIN post_categories pc ON p.id = pc.post_id "
+            "LEFT JOIN categories c ON pc.category_id = c.id "
+            "WHERE u.username = $1 "
+            "GROUP BY p.id, u.username "
+            "ORDER BY p.created_at DESC";
+    }
+    else
+    {
+        sql =
+            "SELECT p.id, p.header, p.slug, p.content, p.reading_time, "
+            "       p.author_id, u.username, p.created_at, p.updated_at, p.is_hidden, "
+            "       COALESCE(string_agg(c.category, ','), '') as categories, "
+            "       COALESCE(string_agg(c.slug, ','), '') as category_slugs, "
+            "       COALESCE(string_agg(c.id::text, ','), '') as category_ids "
+            "FROM posts p "
+            "JOIN users u ON p.author_id = u.id "
+            "LEFT JOIN post_categories pc ON p.id = pc.post_id "
+            "LEFT JOIN categories c ON pc.category_id = c.id "
+            "WHERE u.username = $1 "
+            "  AND p.is_hidden = FALSE "
+            "GROUP BY p.id, u.username "
+            "ORDER BY p.created_at DESC";
+    }
+
+    const char *params[] = {auth_ctx->user_slug};
+
+    // Queue the query and execute
+    if (pquv_queue(pg, sql, 1, params, posts_result_callback, ctx) != 0 ||
+        pquv_execute(pg) != 0)
+    {
+        send_text(500, "Failed to queue or execute query");
+        free_ctx(ctx);
+        return;
+    }
+
+    // Function returns here, callback will be called when query completes
+}
+
+// Callback function that processes the query result
+static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data)
+{
+    ctx_t *ctx = (ctx_t *)data;
+    if (!ctx || !ctx->res)
+        return;
+
+    Res *res = ctx->res;
+
+    if (PQresultStatus(result) != PGRES_TUPLES_OK)
+    {
+        send_text(500, "DB select failed");
+        free_ctx(ctx);
+        return;
+    }
+
+    int rows = PQntuples(result);
+    cJSON *root = cJSON_CreateObject();
+    cJSON *posts = cJSON_CreateArray();
+
+    for (int i = 0; i < rows; i++)
+    {
+        bool hidden = (PQgetvalue(result, i, PQfnumber(result, "is_hidden"))[0] == 't');
+        if (!ctx->is_author && hidden)
+        {
+            // If not author and post is hidden, skip that post
+            continue;
+        }
+
+        cJSON *obj = cJSON_CreateObject();
+        ADD_STR_ROW(obj, header, i);
+        ADD_STR_ROW(obj, slug, i);
+        ADD_STR_ROW(obj, content, i);
+        ADD_INT_ROW(obj, reading_time, i);
+        ADD_INT_ROW(obj, author_id, i);
+        ADD_STR_ROW(obj, username, i);
+        ADD_STR_ROW(obj, created_at, i);
+        ADD_STR_ROW(obj, updated_at, i);
+        ADD_BOOL_ROW(obj, is_hidden, i);
+
+        char *categories_str = PQgetvalue(result, i, PQfnumber(result, "categories"));
+        char *category_slugs_str = PQgetvalue(result, i, PQfnumber(result, "category_slugs"));
+        char *category_ids_str = PQgetvalue(result, i, PQfnumber(result, "category_ids"));
+
+        cJSON *categories_array = cJSON_CreateArray();
+
+        if (strlen(categories_str) > 0)
+        {
+            char *categories_copy = strdup(categories_str);
+            char *slugs_copy = strdup(category_slugs_str);
+            char *ids_copy = strdup(category_ids_str);
+
+            char *category_token = strtok(categories_copy, ",");
+            char *slug_token = strtok(slugs_copy, ",");
+            char *id_token = strtok(ids_copy, ",");
+
+            while (category_token && slug_token && id_token)
+            {
+                cJSON *category_obj = cJSON_CreateObject();
+                cJSON_AddNumberToObject(category_obj, "id", atoi(id_token));
+                cJSON_AddStringToObject(category_obj, "category", category_token);
+                cJSON_AddStringToObject(category_obj, "slug", slug_token);
+                cJSON_AddItemToArray(categories_array, category_obj);
+
+                category_token = strtok(NULL, ",");
+                slug_token = strtok(NULL, ",");
+                id_token = strtok(NULL, ",");
+            }
+
+            free(categories_copy);
+            free(slugs_copy);
+            free(ids_copy);
+        }
+
+        cJSON_AddItemToObject(obj, "categories", categories_array);
+        cJSON_AddItemToArray(posts, obj);
+    }
+
+    cJSON_AddItemToObject(root, "posts", posts);
+    char *out = cJSON_PrintUnformatted(root);
+    send_json(200, out);
+
+    cJSON_Delete(root);
+    free(out);
+    free_ctx(ctx);
+}
