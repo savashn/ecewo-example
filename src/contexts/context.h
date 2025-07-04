@@ -1,7 +1,6 @@
 #ifndef CONTEXT_H
 #define CONTEXT_H
 
-#include "cJSON.h"
 #include <stdbool.h>
 
 typedef struct
