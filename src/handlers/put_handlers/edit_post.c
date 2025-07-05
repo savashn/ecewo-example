@@ -31,7 +31,7 @@ static void free_ctx(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
     if (ctx->header)
         free(ctx->header);
     if (ctx->content)
@@ -67,21 +67,21 @@ void edit_post(Req *req, Res *res)
 
     if (!auth_ctx || !auth_ctx->is_author)
     {
-        send_text(401, "Not allowed");
+        send_text(res, 401, "Not allowed");
         return;
     }
 
-    const char *slug = get_params("post");
+    const char *slug = get_params(req, "post");
     if (!slug)
     {
-        send_text(400, "Post slug is required");
+        send_text(res, 400, "Post slug is required");
         return;
     }
 
     cJSON *json = cJSON_Parse(req->body);
     if (!json)
     {
-        send_text(400, "Invalid JSON");
+        send_text(res, 400, "Invalid JSON");
         return;
     }
 
@@ -92,7 +92,7 @@ void edit_post(Req *req, Res *res)
     if (!jheader || !jcontent || !jheader->valuestring || !jcontent->valuestring)
     {
         cJSON_Delete(json);
-        send_text(400, "Header or content is missing");
+        send_text(res, 400, "Header or content is missing");
         return;
     }
 
@@ -104,7 +104,7 @@ void edit_post(Req *req, Res *res)
     if (!new_slug)
     {
         cJSON_Delete(json);
-        send_text(500, "Memory allocation error in slugify");
+        send_text(res, 500, "Memory allocation error in slugify");
         return;
     }
 
@@ -115,21 +115,12 @@ void edit_post(Req *req, Res *res)
     {
         cJSON_Delete(json);
         free(new_slug);
-        send_text(500, "Memory allocation error");
+        send_text(res, 500, "Memory allocation error");
         return;
     }
 
-    ctx->res = malloc(sizeof(*ctx->res));
-    if (!ctx->res)
-    {
-        free_ctx(ctx);
-        cJSON_Delete(json);
-        free(new_slug);
-        send_text(500, "Memory allocation failed");
-        return;
-    }
-
-    *ctx->res = *res;
+    Res *copy = copy_res(res);
+    ctx->res = copy;
     ctx->header = strdup(header);
     ctx->content = strdup(content);
     ctx->original_slug = strdup(slug);
@@ -146,7 +137,7 @@ void edit_post(Req *req, Res *res)
     {
         free_ctx(ctx);
         cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
@@ -165,7 +156,7 @@ void edit_post(Req *req, Res *res)
             {
                 free_ctx(ctx);
                 cJSON_Delete(json);
-                send_text(500, "Memory allocation failed for categories");
+                send_text(res, 500, "Memory allocation failed for categories");
                 return;
             }
 
@@ -194,7 +185,7 @@ void edit_post(Req *req, Res *res)
     if (!pg)
     {
         free_ctx(ctx);
-        send_text(500, "Database connection error");
+        send_text(res, 500, "Database connection error");
         return;
     }
 
@@ -207,7 +198,7 @@ void edit_post(Req *req, Res *res)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
         free_ctx(ctx);
-        send_text(500, "Failed to queue query");
+        send_text(res, 500, "Failed to queue query");
         return;
     }
 
@@ -216,7 +207,7 @@ void edit_post(Req *req, Res *res)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
         free_ctx(ctx);
-        send_text(500, "Failed to execute query");
+        send_text(res, 500, "Failed to execute query");
         return;
     }
 }
@@ -245,13 +236,12 @@ static void on_query_post_exists(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("on_query_post_exists: DB check failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Database check failed");
+        send_text(ctx->res, 500, "Database check failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -260,7 +250,7 @@ static void on_query_post_exists(pg_async_t *pg, PGresult *result, void *data)
     if (PQntuples(result) == 0)
     {
         printf("on_query_post_exists: Post not found\n");
-        send_text(404, "Post not found");
+        send_text(ctx->res, 404, "Post not found");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -271,7 +261,7 @@ static void on_query_post_exists(pg_async_t *pg, PGresult *result, void *data)
     if (strcmp(post_author_id, ctx->author_id) != 0)
     {
         printf("on_query_post_exists: User is not the author of this post\n");
-        send_text(403, "You can only edit your own posts");
+        send_text(ctx->res, 403, "You can only edit your own posts");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -287,7 +277,7 @@ static void on_query_post_exists(pg_async_t *pg, PGresult *result, void *data)
         {
             if (!ctx->response_sent)
             {
-                send_text(500, "Failed to queue slug check query");
+                send_text(ctx->res, 500, "Failed to queue slug check query");
                 ctx->response_sent = true;
             }
             free_ctx(ctx);
@@ -325,13 +315,12 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("on_check_new_slug: DB check failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Database check failed");
+        send_text(ctx->res, 500, "Database check failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -340,7 +329,7 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
     if (PQntuples(result) > 0)
     {
         printf("on_check_new_slug: New slug already exists\n");
-        send_text(409, "A post with this title already exists");
+        send_text(ctx->res, 409, "A post with this title already exists");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -351,8 +340,6 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
 
 static void update_post(pg_async_t *pg, ctx_t *ctx)
 {
-    Res *res = ctx->res;
-
     // Prepare parameters for update
     char reading_time_str[32], updated_at_str[32];
     char is_hidden_str[8];
@@ -386,7 +373,7 @@ static void update_post(pg_async_t *pg, ctx_t *ctx)
     {
         if (!ctx->response_sent)
         {
-            send_text(500, "Failed to queue update query");
+            send_text(ctx->res, 500, "Failed to queue update query");
             ctx->response_sent = true;
         }
         free_ctx(ctx);
@@ -419,13 +406,12 @@ static void on_post_updated(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("on_post_updated: Update failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Post update failed");
+        send_text(ctx->res, 500, "Post update failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -434,7 +420,7 @@ static void on_post_updated(pg_async_t *pg, PGresult *result, void *data)
     if (PQntuples(result) == 0)
     {
         printf("on_post_updated: No rows affected\n");
-        send_text(404, "Post not found or not updated");
+        send_text(ctx->res, 404, "Post not found or not updated");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -459,13 +445,11 @@ static void clear_post_categories(pg_async_t *pg, ctx_t *ctx, const char *post_i
     const char *delete_sql = "DELETE FROM post_categories WHERE post_id = $1";
     const char *delete_params[] = {post_id};
 
-    Res *res = ctx->res;
-
     if (pquv_queue(pg, delete_sql, 1, delete_params, on_categories_cleared, ctx) != 0)
     {
         if (!ctx->response_sent)
         {
-            send_text(500, "Failed to queue category deletion");
+            send_text(ctx->res, 500, "Failed to queue category deletion");
             ctx->response_sent = true;
         }
         free_ctx(ctx);
@@ -475,8 +459,6 @@ static void clear_post_categories(pg_async_t *pg, ctx_t *ctx, const char *post_i
 
 static void update_post_categories(pg_async_t *pg, ctx_t *ctx, const char *post_id)
 {
-    Res *res = ctx->res;
-
     const char *delete_sql = "DELETE FROM post_categories WHERE post_id = $1";
     const char *delete_params[] = {post_id};
 
@@ -487,7 +469,7 @@ static void update_post_categories(pg_async_t *pg, ctx_t *ctx, const char *post_
     {
         if (!ctx->response_sent)
         {
-            send_text(500, "Failed to queue category deletion");
+            send_text(ctx->res, 500, "Failed to queue category deletion");
             ctx->response_sent = true;
         }
         free_ctx(ctx);
@@ -498,7 +480,6 @@ static void update_post_categories(pg_async_t *pg, ctx_t *ctx, const char *post_
 static void on_old_categories_deleted(pg_async_t *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-    Res *res = ctx->res;
 
     if (!ctx || !ctx->res || ctx->response_sent)
     {
@@ -518,7 +499,7 @@ static void on_old_categories_deleted(pg_async_t *pg, PGresult *result, void *da
     if (status != PGRES_COMMAND_OK)
     {
         printf("on_old_categories_deleted: Delete failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Failed to delete old categories");
+        send_text(ctx->res, 500, "Failed to delete old categories");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -529,11 +510,9 @@ static void on_old_categories_deleted(pg_async_t *pg, PGresult *result, void *da
 
 static void insert_new_categories(pg_async_t *pg, ctx_t *ctx)
 {
-    Res *res = ctx->res;
-
     if (!ctx->category_ids || ctx->category_count == 0)
     {
-        send_text(200, "Post updated successfully");
+        send_text(ctx->res, 200, "Post updated successfully");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -543,7 +522,7 @@ static void insert_new_categories(pg_async_t *pg, ctx_t *ctx)
     ctx->batch_sql = malloc(sql_size);
     if (!ctx->batch_sql)
     {
-        send_text(500, "Memory allocation failed");
+        send_text(ctx->res, 500, "Memory allocation failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -554,7 +533,7 @@ static void insert_new_categories(pg_async_t *pg, ctx_t *ctx)
     char **batch_params = malloc(ctx->category_count * 2 * sizeof(char *));
     if (!batch_params)
     {
-        send_text(500, "Memory allocation failed");
+        send_text(ctx->res, 500, "Memory allocation failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -568,7 +547,7 @@ static void insert_new_categories(pg_async_t *pg, ctx_t *ctx)
             for (int j = 0; j < i * 2; j++)
                 free(batch_params[j]);
             free(batch_params);
-            send_text(500, "Memory allocation failed");
+            send_text(ctx->res, 500, "Memory allocation failed");
             ctx->response_sent = true;
             free_ctx(ctx);
             return;
@@ -595,7 +574,7 @@ static void insert_new_categories(pg_async_t *pg, ctx_t *ctx)
 
         if (!ctx->response_sent)
         {
-            send_text(500, "Failed to queue category insert");
+            send_text(ctx->res, 500, "Failed to queue category insert");
             ctx->response_sent = true;
         }
         free_ctx(ctx);
@@ -611,7 +590,6 @@ static void insert_new_categories(pg_async_t *pg, ctx_t *ctx)
 static void on_categories_cleared(pg_async_t *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-    Res *res = ctx->res;
 
     if (!ctx || !ctx->res || ctx->response_sent)
     {
@@ -620,7 +598,7 @@ static void on_categories_cleared(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    send_text(200, "Post updated successfully");
+    send_text(ctx->res, 200, "Post updated successfully");
     ctx->response_sent = true;
     free_ctx(ctx);
 }
@@ -628,7 +606,6 @@ static void on_categories_cleared(pg_async_t *pg, PGresult *result, void *data)
 static void on_categories_inserted(pg_async_t *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-    Res *res = ctx->res;
 
     if (!ctx || !ctx->res || ctx->response_sent)
     {
@@ -648,13 +625,13 @@ static void on_categories_inserted(pg_async_t *pg, PGresult *result, void *data)
     if (status != PGRES_COMMAND_OK)
     {
         printf("on_categories_inserted: Insert failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Failed to insert categories");
+        send_text(ctx->res, 500, "Failed to insert categories");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
     }
 
-    send_text(200, "Post updated successfully");
+    send_text(ctx->res, 200, "Post updated successfully");
     ctx->response_sent = true;
     free_ctx(ctx);
 }

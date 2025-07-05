@@ -9,7 +9,7 @@ void hello_world(Req *req, Res *res)
     cJSON *json = cJSON_CreateObject();
     cJSON_AddStringToObject(json, "message", "Hello World!");
     char *json_string = cJSON_PrintUnformatted(json);
-    send_json(200, json_string);
+    send_json(res, 200, json_string);
     cJSON_Delete(json);
     free(json_string);
 }
@@ -23,7 +23,7 @@ void get_all_users(Req *req, Res *res)
     {
         fprintf(stderr, "DB select failed: %s", PQerrorMessage(db));
         PQclear(resPQ);
-        send_text(500, "DB select failed");
+        send_text(res, 500, "DB select failed");
         return;
     }
 
@@ -47,7 +47,7 @@ void get_all_users(Req *req, Res *res)
     PQclear(resPQ);
 
     char *json_string = cJSON_PrintUnformatted(json_array);
-    send_json(200, json_string);
+    send_json(res, 200, json_string);
 
     cJSON_Delete(json_array);
     free(json_string);
@@ -59,11 +59,11 @@ void logout(Req *req, Res *res)
 
     if (!sess)
     {
-        send_text(400, "You have to login");
+        send_text(res, 400, "You have to login");
     }
     else
     {
         delete_session(res, sess);
-        send_text(302, "Logged out");
+        send_text(res, 302, "Logged out");
     }
 }

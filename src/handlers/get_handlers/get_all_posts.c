@@ -14,7 +14,7 @@ static void free_ctx(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
 
     free(ctx);
 }
@@ -23,26 +23,18 @@ static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data);
 
 void get_all_posts(Req *req, Res *res)
 {
-    auth_context_t *auth_ctx = get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
 
     // Create context to pass to callback
     ctx_t *ctx = calloc(1, sizeof(ctx_t));
     if (!ctx)
     {
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
-    ctx->res = malloc(sizeof(*ctx->res));
-
-    if (!ctx->res)
-    {
-        send_text(500, "Memory allocation failed");
-        free_ctx(ctx);
-        return;
-    }
-
-    *ctx->res = *res;
+    Res *copy = copy_res(res);
+    ctx->res = copy;
     ctx->is_author = auth_ctx->is_author;
 
     // Create async PostgreSQL context
@@ -50,7 +42,7 @@ void get_all_posts(Req *req, Res *res)
     if (!pg)
     {
         printf("get_all_posts: Failed to create async context\n");
-        send_text(500, "Failed to create async context");
+        send_text(res, 500, "Failed to create async context");
         free(ctx);
         return;
     }
@@ -97,7 +89,7 @@ void get_all_posts(Req *req, Res *res)
     if (pquv_queue(pg, sql, 1, params, posts_result_callback, ctx) != 0 ||
         pquv_execute(pg) != 0)
     {
-        send_text(500, "Failed to queue or execute query");
+        send_text(res, 500, "Failed to queue or execute query");
         free_ctx(ctx);
         return;
     }
@@ -112,11 +104,9 @@ static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data)
     if (!ctx || !ctx->res)
         return;
 
-    Res *res = ctx->res;
-
     if (PQresultStatus(result) != PGRES_TUPLES_OK)
     {
-        send_text(500, "DB select failed");
+        send_text(ctx->res, 500, "DB select failed");
         free_ctx(ctx);
         return;
     }
@@ -185,7 +175,7 @@ static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data)
 
     cJSON_AddItemToObject(root, "posts", posts);
     char *out = cJSON_PrintUnformatted(root);
-    send_json(200, out);
+    send_json(ctx->res, 200, out);
 
     cJSON_Delete(root);
     free(out);

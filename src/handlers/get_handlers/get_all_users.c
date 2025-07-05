@@ -27,27 +27,18 @@ void get_all_users_async(Req *req, Res *res)
     ctx_t *ctx = calloc(1, sizeof(ctx_t));
     if (!ctx)
     {
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
-    ctx->res = malloc(sizeof(*ctx->res));
-
-    if (!ctx->res)
-    {
-        send_text(500, "Memory allocation failed");
-        free_ctx(ctx);
-        return;
-    }
-
-    *ctx->res = *res;
+    ctx->res = copy_res(res);
 
     // Create async PostgreSQL context
     pg_async_t *pg = pquv_create(db, ctx);
     if (!pg)
     {
         printf("get_all_users_async: Failed to create pg_async context\n");
-        send_text(500, "Failed to create async context");
+        send_text(res, 500, "Failed to create async context");
         free(ctx);
         return;
     }
@@ -57,7 +48,7 @@ void get_all_users_async(Req *req, Res *res)
     if (result != 0)
     {
         printf("get_all_users_async: Failed to queue query\n");
-        send_text(500, "Failed to queue query");
+        send_text(res, 500, "Failed to queue query");
         free(ctx);
         return;
     }
@@ -67,7 +58,7 @@ void get_all_users_async(Req *req, Res *res)
     if (result != 0)
     {
         printf("get_all_users_async: Failed to execute query\n");
-        send_text(500, "Failed to execute query");
+        send_text(res, 500, "Failed to execute query");
         free(ctx);
         return;
     }
@@ -86,16 +77,12 @@ static void users_result_callback(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    printf("users_result_callback: Processing results\n");
-
-    Res *res = ctx->res;
-
     // Check result status
     ExecStatusType status = PQresultStatus(result);
     if (status != PGRES_TUPLES_OK)
     {
         printf("users_result_callback: Query failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "DB select failed");
+        send_text(ctx->res, 500, "DB select failed");
         free(ctx);
         return;
     }
@@ -118,7 +105,7 @@ static void users_result_callback(pg_async_t *pg, PGresult *result, void *data)
     }
 
     char *json_string = cJSON_PrintUnformatted(json_array);
-    send_json(200, json_string);
+    send_json(ctx->res, 200, json_string);
 
     // Cleanup
     cJSON_Delete(json_array);

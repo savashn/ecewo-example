@@ -7,7 +7,7 @@ int body_checker(Req *req, Res *res, Chain *chain)
 {
     if (!req->body)
     {
-        send_text(400, "Missing request body");
+        send_text(res, 400, "Missing request body");
         return 0;
     }
 
@@ -23,7 +23,7 @@ int is_auth(Req *req, Res *res, Chain *chain)
     auth_context_t *ctx = calloc(1, sizeof(auth_context_t));
     if (!ctx)
     {
-        send_text(500, "Internal Server Error");
+        send_text(res, 500, "Internal Server Error");
         return 0;
     }
 
@@ -34,7 +34,7 @@ int is_auth(Req *req, Res *res, Chain *chain)
         if (!session_json)
         {
             free(ctx);
-            send_text(500, "Error: Failed to parse session data");
+            send_text(res, 500, "Error: Failed to parse session data");
             return 0;
         }
 
@@ -47,7 +47,7 @@ int is_auth(Req *req, Res *res, Chain *chain)
         {
             cJSON_Delete(session_json);
             free(ctx);
-            send_text(500, "Error: Incomplete session data");
+            send_text(res, 500, "Error: Incomplete session data");
             return 0;
         }
 
@@ -80,14 +80,14 @@ int is_auth(Req *req, Res *res, Chain *chain)
 
 int is_authors_self(Req *req, Res *res, Chain *chain)
 {
-    auth_context_t *auth_ctx = get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
 
-    const char *user_slug = get_params("user");
+    const char *user_slug = get_params(req, "user");
     auth_ctx->user_slug = strdup(user_slug ? user_slug : "");
 
     if (!auth_ctx->user_slug)
     {
-        send_text(500, "Internal Server Error");
+        send_text(res, 500, "Internal Server Error");
         return 0;
     }
 
@@ -106,7 +106,7 @@ int auth_only(Req *req, Res *res, Chain *chain)
 
     if (!ctx || !ctx->id || !ctx->name || !ctx->username)
     {
-        send_text(401, "Not allowed");
+        send_text(res, 401, "Not allowed");
         return 0;
     }
 

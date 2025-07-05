@@ -29,7 +29,7 @@ static void free_ctx(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
     if (ctx->header)
         free(ctx->header);
     if (ctx->content)
@@ -57,7 +57,7 @@ void create_post(Req *req, Res *res)
     cJSON *json = cJSON_Parse(req->body);
     if (!json)
     {
-        send_text(400, "Invalid JSON");
+        send_text(res, 400, "Invalid JSON");
         return;
     }
 
@@ -68,7 +68,7 @@ void create_post(Req *req, Res *res)
     if (!jheader || !jcontent || !jheader->valuestring || !jcontent->valuestring)
     {
         cJSON_Delete(json);
-        send_text(400, "Header or content is missing");
+        send_text(res, 400, "Header or content is missing");
         return;
     }
 
@@ -81,7 +81,7 @@ void create_post(Req *req, Res *res)
     if (!slug)
     {
         cJSON_Delete(json);
-        send_text(500, "Memory allocation error in slugify");
+        send_text(res, 500, "Memory allocation error in slugify");
         return;
     }
 
@@ -92,22 +92,12 @@ void create_post(Req *req, Res *res)
     {
         cJSON_Delete(json);
         free(slug);
-        send_text(500, "Memory allocation error");
+        send_text(res, 500, "Memory allocation error");
         return;
     }
 
-    ctx->res = malloc(sizeof(*ctx->res));
-
-    if (!ctx->res)
-    {
-        free_ctx(ctx);
-        cJSON_Delete(json);
-        free(slug);
-        send_text(500, "Memory allocation failed");
-        return;
-    }
-
-    *ctx->res = *res;
+    Res *copy = copy_res(res);
+    ctx->res = copy;
     ctx->header = strdup(header);
     ctx->content = strdup(content);
     ctx->slug = strdup(slug);
@@ -124,7 +114,7 @@ void create_post(Req *req, Res *res)
     {
         free_ctx(ctx);
         cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
@@ -144,7 +134,7 @@ void create_post(Req *req, Res *res)
             {
                 free_ctx(ctx);
                 cJSON_Delete(json);
-                send_text(500, "Memory allocation failed for categories");
+                send_text(res, 500, "Memory allocation failed for categories");
                 return;
             }
 
@@ -173,7 +163,7 @@ void create_post(Req *req, Res *res)
     if (!pg)
     {
         free_ctx(ctx);
-        send_text(500, "Database connection error");
+        send_text(res, 500, "Database connection error");
         return;
     }
 
@@ -185,7 +175,7 @@ void create_post(Req *req, Res *res)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
         free_ctx(ctx);
-        send_text(500, "Failed to queue query");
+        send_text(res, 500, "Failed to queue query");
         return;
     }
 
@@ -194,7 +184,7 @@ void create_post(Req *req, Res *res)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
         free_ctx(ctx);
-        send_text(500, "Failed to execute query");
+        send_text(res, 500, "Failed to execute query");
         return;
     }
 }
@@ -223,13 +213,12 @@ static void on_query_post(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("on_query_post: DB check failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Database check failed");
+        send_text(ctx->res, 500, "Database check failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -238,7 +227,7 @@ static void on_query_post(pg_async_t *pg, PGresult *result, void *data)
     if (PQntuples(result) > 0)
     {
         printf("on_query_post: Post with this slug already exists\n");
-        send_text(409, "This post already exists");
+        send_text(ctx->res, 409, "This post already exists");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -274,7 +263,7 @@ static void on_query_post(pg_async_t *pg, PGresult *result, void *data)
     {
         if (!ctx->response_sent)
         {
-            send_text(500, "Failed to queue insert query");
+            send_text(ctx->res, 500, "Failed to queue insert query");
             ctx->response_sent = true;
         }
         free_ctx(ctx);
@@ -300,12 +289,10 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
-
     if (!result || PQresultStatus(result) != PGRES_TUPLES_OK)
     {
         printf("on_post_created: Post insert failed\n");
-        send_text(500, "DB insert failed");
+        send_text(ctx->res, 500, "DB insert failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -315,7 +302,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
 
     if (ctx->category_count == 0)
     {
-        send_text(201, "Post created successfully");
+        send_text(ctx->res, 201, "Post created successfully");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
@@ -329,7 +316,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
     {
         if (!ctx->response_sent)
         {
-            send_text(500, "Memory allocation failed");
+            send_text(ctx->res, 500, "Memory allocation failed");
             ctx->response_sent = true;
         }
         free_ctx(ctx);
@@ -356,7 +343,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
     {
         if (!ctx->response_sent)
         {
-            send_text(500, "Failed to queue batch category insert");
+            send_text(ctx->res, 500, "Failed to queue batch category insert");
             ctx->response_sent = true;
         }
         free_ctx(ctx);
@@ -383,20 +370,19 @@ static void insert_post_result(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_COMMAND_OK)
     {
         printf("insert_post_result: Batch category insert failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Category insert failed");
+        send_text(ctx->res, 500, "Category insert failed");
         ctx->response_sent = true;
         free_ctx(ctx);
         return;
     }
 
     printf("insert_post_result: Post created successfully with all categories\n");
-    send_text(201, "Post created successfully");
+    send_text(ctx->res, 201, "Post created successfully");
     ctx->response_sent = true;
     free_ctx(ctx);
 }

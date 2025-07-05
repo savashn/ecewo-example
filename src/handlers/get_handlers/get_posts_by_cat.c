@@ -14,7 +14,7 @@ static void free_ctx(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
 
     free(ctx);
 }
@@ -23,40 +23,32 @@ void on_result(pg_async_t *pg, PGresult *result, void *data);
 
 void get_posts_by_cat(Req *req, Res *res)
 {
-    const char *category = get_query("category");
+    const char *category = get_query(req, "category");
 
     if (!category || strlen(category) == 0)
     {
-        send_text(400, "Category parameter is required");
+        send_text(res, 400, "Category parameter is required");
         return;
     }
 
-    auth_context_t *auth_ctx = get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
 
     ctx_t *ctx = calloc(1, sizeof(ctx_t));
     if (!ctx)
     {
-        send_text(500, "Memory allocation error");
+        send_text(res, 500, "Memory allocation error");
         return;
     }
 
-    ctx->res = malloc(sizeof(*ctx->res));
-
-    if (!ctx->res)
-    {
-        free_ctx(ctx);
-        send_text(500, "Memory allocation failed");
-        return;
-    }
-
-    *ctx->res = *res;
+    Res *copy = copy_res(res);
+    ctx->res = copy;
     ctx->is_author = auth_ctx->is_author;
 
     pg_async_t *pg = pquv_create(db, ctx);
     if (!pg)
     {
         free_ctx(ctx);
-        send_text(500, "Database connection error");
+        send_text(res, 500, "Database connection error");
         return;
     }
 
@@ -81,7 +73,7 @@ void get_posts_by_cat(Req *req, Res *res)
     {
         printf("ERROR: Failed to queue query, result=%d\n", qr);
         free_ctx(ctx);
-        send_text(500, "Failed to queue query");
+        send_text(res, 500, "Failed to queue query");
         return;
     }
 
@@ -90,7 +82,7 @@ void get_posts_by_cat(Req *req, Res *res)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
         free_ctx(ctx);
-        send_text(500, "Failed to execute query");
+        send_text(res, 500, "Failed to execute query");
         return;
     }
 }
@@ -114,11 +106,9 @@ void on_result(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
-
     if (PQresultStatus(result) != PGRES_TUPLES_OK)
     {
-        send_text(500, "DB select failed");
+        send_text(ctx->res, 500, "DB select failed");
         free_ctx(ctx);
         return;
     }
@@ -133,7 +123,7 @@ void on_result(pg_async_t *pg, PGresult *result, void *data)
     {
         cJSON_AddItemToObject(root, "posts", posts);
         char *out = cJSON_PrintUnformatted(root);
-        send_json(200, out);
+        send_json(ctx->res, 200, out);
         cJSON_Delete(root);
         free(out);
         free_ctx(ctx);
@@ -168,7 +158,7 @@ void on_result(pg_async_t *pg, PGresult *result, void *data)
 
     cJSON_AddItemToObject(root, "posts", posts);
     char *out = cJSON_PrintUnformatted(root);
-    send_json(200, out);
+    send_json(ctx->res, 200, out);
 
     cJSON_Delete(root);
     free(out);

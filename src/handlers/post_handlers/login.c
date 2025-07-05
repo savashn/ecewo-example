@@ -18,7 +18,7 @@ static void free_ctx(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
     if (ctx->username)
         free(ctx->username);
     if (ctx->password)
@@ -41,7 +41,7 @@ void login(Req *req, Res *res)
 
     if (user_session)
     {
-        send_text(400, "Error: You are already logged in");
+        send_text(res, 400, "Error: You are already logged in");
         return;
     }
 
@@ -49,7 +49,7 @@ void login(Req *req, Res *res)
     cJSON *json = cJSON_Parse(req->body);
     if (!json)
     {
-        send_text(400, "Invalid JSON");
+        send_text(res, 400, "Invalid JSON");
         return;
     }
 
@@ -60,7 +60,7 @@ void login(Req *req, Res *res)
     {
         printf("ERROR: Username or password missing\n");
         cJSON_Delete(json);
-        send_text(400, "Username or password is missing");
+        send_text(res, 400, "Username or password is missing");
         return;
     }
 
@@ -69,7 +69,7 @@ void login(Req *req, Res *res)
     if (!ctx)
     {
         printf("ERROR: Memory allocation failed\n");
-        send_text(500, "Memory allocation error");
+        send_text(res, 500, "Memory allocation error");
         return;
     }
 
@@ -77,18 +77,8 @@ void login(Req *req, Res *res)
     ctx->password = strdup(jpass->valuestring);
     cJSON_Delete(json);
 
-    ctx->res = malloc(sizeof(*ctx->res));
-
-    if (!ctx->res)
-    {
-        send_text(500, "Memory allocation failed");
-        free_ctx(ctx);
-        return;
-    }
-
-    // Copy necessary base fields from the original response
-
-    *ctx->res = *res;
+    Res *copy = copy_res(res);
+    ctx->res = copy;
 
     // Create PostgreSQL async context
     pg_async_t *pg = pquv_create(db, ctx);
@@ -97,7 +87,7 @@ void login(Req *req, Res *res)
     {
         printf("ERROR: Failed to create pg_async context\n");
         free_ctx(ctx);
-        send_text(500, "Database connection error");
+        send_text(res, 500, "Database connection error");
         return;
     }
 
@@ -110,7 +100,7 @@ void login(Req *req, Res *res)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
         free_ctx(ctx);
-        send_text(500, "Failed to queue query");
+        send_text(res, 500, "Failed to queue query");
         return;
     }
 
@@ -120,7 +110,7 @@ void login(Req *req, Res *res)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
         free_ctx(ctx);
-        send_text(500, "Failed to execute query");
+        send_text(res, 500, "Failed to execute query");
         return;
     }
 }
@@ -138,12 +128,10 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
 
     ExecStatusType status = PQresultStatus(result);
 
-    Res *res = ctx->res;
-
     if (PQntuples(result) == 0)
     {
         free_ctx(ctx);
-        send_text(404, "User not found");
+        send_text(ctx->res, 404, "User not found");
         return;
     }
 
@@ -155,14 +143,14 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
     // Verify password
     if (sodium_init() < 0)
     {
-        send_text(500, "Crypto init failed");
+        send_text(ctx->res, 500, "Crypto init failed");
         return;
     }
 
     int verify_result = crypto_pwhash_str_verify(ctx->hashed_password, ctx->password, strlen(ctx->password));
     if (verify_result != 0)
     {
-        send_text(401, "Incorrect password");
+        send_text(ctx->res, 401, "Incorrect password");
         free_ctx(ctx);
         return;
     }
@@ -178,6 +166,6 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
         set_session(sess, "is_admin", "true");
     }
 
-    send_session(res, sess);
-    send_text(200, "Login successful");
+    send_session(ctx->res, sess);
+    send_text(ctx->res, 200, "Login successful");
 }

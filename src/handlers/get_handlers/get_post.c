@@ -14,7 +14,7 @@ static void free_ctx(ctx_t *ctx)
     if (!ctx)
         return;
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
     if (ctx->username)
         free(ctx->username);
     if (ctx->post_slug)
@@ -26,29 +26,21 @@ static void on_query_posts(pg_async_t *pg, PGresult *result, void *data);
 
 void get_post(Req *req, Res *res)
 {
-    const char *post_slug = get_params("post");
+    const char *post_slug = get_params(req, "post");
 
-    auth_context_t *auth_ctx = get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
     const char *user_slug = auth_ctx->user_slug;
     bool is_author = auth_ctx->is_author;
 
     ctx_t *ctx = calloc(1, sizeof(ctx_t));
     if (!ctx)
     {
-        send_text(500, "Memory allocation error");
+        send_text(res, 500, "Memory allocation error");
         return;
     }
 
-    ctx->res = malloc(sizeof(*ctx->res));
-
-    if (!ctx->res)
-    {
-        free_ctx(ctx);
-        send_text(500, "Memory allocation failed");
-        return;
-    }
-
-    *ctx->res = *res;
+    Res *copy = copy_res(res);
+    ctx->res = copy;
     ctx->username = strdup(user_slug);
     ctx->post_slug = strdup(post_slug);
 
@@ -56,7 +48,7 @@ void get_post(Req *req, Res *res)
     if (!pg)
     {
         free_ctx(ctx);
-        send_text(500, "Database connection error");
+        send_text(res, 500, "Database connection error");
         return;
     }
 
@@ -100,7 +92,7 @@ void get_post(Req *req, Res *res)
     {
         printf("ERROR: Failed to queue query, result=%d\n", qr);
         free_ctx(ctx);
-        send_text(500, "Failed to queue query");
+        send_text(res, 500, "Failed to queue query");
         return;
     }
 
@@ -109,7 +101,7 @@ void get_post(Req *req, Res *res)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
         free_ctx(ctx);
-        send_text(500, "Failed to execute query");
+        send_text(res, 500, "Failed to execute query");
         return;
     }
 }
@@ -133,12 +125,10 @@ static void on_query_posts(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
-
     if (PQntuples(result) == 0)
     {
         printf("No post found\n");
-        send_text(404, "Post not found");
+        send_text(ctx->res, 404, "Post not found");
         free_ctx(ctx);
         return;
     }
@@ -191,7 +181,7 @@ static void on_query_posts(pg_async_t *pg, PGresult *result, void *data)
     cJSON_AddItemToObject(response, "categories", arr);
 
     char *json_str = cJSON_PrintUnformatted(response);
-    send_json(200, json_str);
+    send_json(ctx->res, 200, json_str);
 
     free(json_str);
     cJSON_Delete(response);

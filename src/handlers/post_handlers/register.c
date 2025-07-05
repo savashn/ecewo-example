@@ -20,7 +20,7 @@ static void cleanup(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
     if (ctx->name)
         free(ctx->name);
     if (ctx->username)
@@ -45,7 +45,7 @@ void add_user(Req *req, Res *res)
     cJSON *json = cJSON_Parse(req->body);
     if (!json)
     {
-        send_text(400, "Invalid JSON");
+        send_text(res, 400, "Invalid JSON");
         return;
     }
 
@@ -61,7 +61,7 @@ void add_user(Req *req, Res *res)
         !cJSON_IsString(j_email))
     {
         cJSON_Delete(json);
-        send_text(400, "Missing or invalid fields");
+        send_text(res, 400, "Missing or invalid fields");
         return;
     }
 
@@ -76,24 +76,12 @@ void add_user(Req *req, Res *res)
     if (!ctx)
     {
         cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
-    // Deep copy req and res structures
-    ctx->res = malloc(sizeof(Res));
-    if (!ctx->res)
-    {
-
-        if (ctx->res)
-            free(ctx->res);
-        cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
-        return;
-    }
-
-    // Deep copy struct
-    *ctx->res = *res; // Deep copy struct
+    Res *copy = copy_res(res);
+    ctx->res = copy;
 
     // Copy all strings to context (they need to persist after this function returns)
     ctx->name = strdup(name);
@@ -106,7 +94,7 @@ void add_user(Req *req, Res *res)
     {
         cleanup(ctx);
         cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
@@ -116,7 +104,7 @@ void add_user(Req *req, Res *res)
     {
         cleanup(ctx);
         cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
@@ -128,7 +116,7 @@ void add_user(Req *req, Res *res)
     {
         cleanup(ctx);
         cJSON_Delete(json);
-        send_text(500, "Password hashing failed");
+        send_text(res, 500, "Password hashing failed");
         return;
     }
 
@@ -139,7 +127,7 @@ void add_user(Req *req, Res *res)
     if (!pg)
     {
         cleanup(ctx);
-        send_text(500, "Failed to create async DB context");
+        send_text(res, 500, "Failed to create async DB context");
         return;
     }
 
@@ -156,8 +144,7 @@ void add_user(Req *req, Res *res)
     if (pquv_queue(pg, check_sql, 2, check_params, check_user_exists, ctx) != 0)
     {
         cleanup(ctx);
-        // pg_async_destroy(pg); WILL RUN AUTOMATICALLY
-        send_text(500, "Failed to queue database query");
+        send_text(res, 500, "Failed to queue database query");
         return;
     }
 
@@ -165,8 +152,7 @@ void add_user(Req *req, Res *res)
     if (pquv_execute(pg) != 0)
     {
         cleanup(ctx);
-        // pg_async_destroy(pg); WILL RUN AUTOMATICALLY
-        send_text(500, "Failed to execute database query");
+        send_text(res, 500, "Failed to execute database query");
         return;
     }
 
@@ -185,14 +171,12 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("check_user_exists: DB check failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Database check failed");
-        // pg_async_destroy(pg); WILL RUN AUTOMATICALLY
+        send_text(ctx->res, 500, "Database check failed");
         cleanup(ctx);
         return;
     }
@@ -204,7 +188,7 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
     if (count > 0)
     {
         printf("check_user_exists: Username or email already exists\n");
-        send_text(409, "Username or email already exists");
+        send_text(ctx->res, 409, "Username or email already exists");
         cleanup(ctx);
         return;
     }
@@ -229,9 +213,8 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
     // Queue the async insert query using the same pg context
     if (pquv_queue(pg, insert_sql, 5, insert_params, add_user_result, ctx) != 0)
     {
-        send_text(500, "Failed to queue insert query");
+        send_text(ctx->res, 500, "Failed to queue insert query");
         cleanup(ctx);
-        // pg_async_destroy(pg); WILL RUN AUTOMATICALLY
         return;
     }
 
@@ -249,18 +232,17 @@ static void add_user_result(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status == PGRES_COMMAND_OK)
     {
         printf("add_user_result: User created successfully\n");
-        send_text(201, "User created!");
+        send_text(ctx->res, 201, "User created!");
     }
     else
     {
         printf("add_user_result: DB insert failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "DB insert failed");
+        send_text(ctx->res, 500, "DB insert failed");
     }
 
     cleanup(ctx);

@@ -21,7 +21,7 @@ static void free_ctx(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
     if (ctx->category)
         free(ctx->category);
     if (ctx->original_slug)
@@ -45,21 +45,21 @@ void edit_category(Req *req, Res *res)
 
     if (!auth_ctx || !auth_ctx->is_author)
     {
-        send_text(401, "Not allowed");
+        send_text(res, 401, "Not allowed");
         return;
     }
 
-    const char *slug = get_params("category");
+    const char *slug = get_params(req, "category");
     if (!slug)
     {
-        send_text(400, "Category slug is required");
+        send_text(res, 400, "Category slug is required");
         return;
     }
 
     cJSON *json = cJSON_Parse(req->body);
     if (!json)
     {
-        send_text(400, "Invalid JSON");
+        send_text(res, 400, "Invalid JSON");
         return;
     }
 
@@ -68,7 +68,7 @@ void edit_category(Req *req, Res *res)
     if (!jcategory || !jcategory->valuestring)
     {
         cJSON_Delete(json);
-        send_text(400, "Category field is missing");
+        send_text(res, 400, "Category field is missing");
         return;
     }
 
@@ -79,7 +79,7 @@ void edit_category(Req *req, Res *res)
     if (!new_slug)
     {
         cJSON_Delete(json);
-        send_text(500, "Memory allocation error in slugify");
+        send_text(res, 500, "Memory allocation error in slugify");
         return;
     }
 
@@ -87,21 +87,12 @@ void edit_category(Req *req, Res *res)
     if (!ctx)
     {
         cJSON_Delete(json);
-        send_text(500, "Memory allocation error");
+        send_text(res, 500, "Memory allocation error");
         return;
     }
 
-    ctx->res = malloc(sizeof(*ctx->res));
-
-    if (!ctx->res)
-    {
-        free_ctx(ctx);
-        cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
-        return;
-    }
-
-    *ctx->res = *res;
+    Res *copy = copy_res(res);
+    ctx->res = copy;
     ctx->category = strdup(category);
     ctx->original_slug = strdup(slug);
     ctx->new_slug = strdup(new_slug);
@@ -113,7 +104,7 @@ void edit_category(Req *req, Res *res)
     {
         free_ctx(ctx);
         cJSON_Delete(json);
-        send_text(500, "Memory allocation failed");
+        send_text(res, 500, "Memory allocation failed");
         return;
     }
 
@@ -123,7 +114,7 @@ void edit_category(Req *req, Res *res)
     if (!pg)
     {
         free_ctx(ctx);
-        send_text(500, "Database connection error");
+        send_text(res, 500, "Database connection error");
         return;
     }
 
@@ -135,7 +126,7 @@ void edit_category(Req *req, Res *res)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
         free_ctx(ctx);
-        send_text(500, "Failed to queue query");
+        send_text(res, 500, "Failed to queue query");
         return;
     }
 
@@ -144,7 +135,7 @@ void edit_category(Req *req, Res *res)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
         free_ctx(ctx);
-        send_text(500, "Failed to execute query");
+        send_text(res, 500, "Failed to execute query");
         return;
     }
 }
@@ -168,13 +159,12 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("on_query_category: DB check failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Database check failed");
+        send_text(ctx->res, 500, "Database check failed");
         free_ctx(ctx);
         return;
     }
@@ -182,7 +172,7 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
     if (PQntuples(result) == 0)
     {
         printf("on_query_category: Category not found\n");
-        send_text(404, "Category not found");
+        send_text(ctx->res, 404, "Category not found");
         free_ctx(ctx);
         return;
     }
@@ -194,7 +184,7 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
 
         if (pquv_queue(pg, check_slug_sql, 2, check_params, on_check_new_slug, ctx) != 0)
         {
-            send_text(500, "Failed to queue slug check query");
+            send_text(ctx->res, 500, "Failed to queue slug check query");
             free_ctx(ctx);
             return;
         }
@@ -225,13 +215,12 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("on_check_new_slug: DB check failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Database check failed");
+        send_text(ctx->res, 500, "Database check failed");
         free_ctx(ctx);
         return;
     }
@@ -239,7 +228,7 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
     if (PQntuples(result) > 0)
     {
         printf("on_check_new_slug: New slug already exists\n");
-        send_text(409, "A category with this title already exists");
+        send_text(ctx->res, 409, "A category with this title already exists");
         free_ctx(ctx);
         return;
     }
@@ -249,8 +238,6 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
 
 static void update_category(pg_async_t *pg, ctx_t *ctx)
 {
-    Res *res = ctx->res;
-
     const char *update_params[3] = {
         ctx->category,
         ctx->new_slug,
@@ -266,7 +253,7 @@ static void update_category(pg_async_t *pg, ctx_t *ctx)
 
     if (pquv_queue(pg, update_sql, 3, update_params, on_category_updated, ctx) != 0)
     {
-        send_text(500, "Failed to queue update query");
+        send_text(ctx->res, 500, "Failed to queue update query");
         free_ctx(ctx);
         return;
     }
@@ -291,13 +278,12 @@ static void on_category_updated(pg_async_t *pg, PGresult *result, void *data)
         return;
     }
 
-    Res *res = ctx->res;
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
     {
         printf("on_category_updated: Update failed: %s\n", PQresultErrorMessage(result));
-        send_text(500, "Category update failed");
+        send_text(ctx->res, 500, "Category update failed");
         free_ctx(ctx);
         return;
     }
@@ -305,11 +291,11 @@ static void on_category_updated(pg_async_t *pg, PGresult *result, void *data)
     if (PQntuples(result) == 0)
     {
         printf("on_category_updated: No rows affected\n");
-        send_text(404, "Category not found or not updated");
+        send_text(ctx->res, 404, "Category not found or not updated");
         free_ctx(ctx);
         return;
     }
 
-    send_text(200, "Category updated successfully");
+    send_text(ctx->res, 200, "Category updated successfully");
     free_ctx(ctx);
 }
