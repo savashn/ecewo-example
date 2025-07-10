@@ -22,6 +22,13 @@ static Session *sessions = NULL; // Pointer to array of sessions
 static int max_sessions = 0;     // Current capacity of the sessions array
 static int initialized = 0;      // Flag to check if sessions are initialized
 
+static const cookie_options_t COOKIE_DEFAULTS = {
+    .path = "/",
+    .same_site = "Lax",
+    .http_only = true,
+    .secure = true,
+};
+
 // Initialize the session system
 int init_sessions(void)
 {
@@ -402,10 +409,9 @@ void free_session(Session *sess)
     }
 }
 
-Session *get_session(request_t *headers)
+Session *get_session(Req *req)
 {
-    // Extract the session_id cookie (heap-allocated)
-    char *sid = handle_get_cookie(headers, "session");
+    char *sid = get_cookie(req, "session");
     if (!sid)
         return NULL;
 
@@ -430,9 +436,9 @@ void print_sessions(void)
     }
 }
 
-void send_session(Res *res, Session *sess)
+void send_session(Res *res, Session *sess, cookie_options_t *options)
 {
-    if (!sess || sess->id[0] == '\0')
+    if (!res || !sess || sess->id[0] == '\0')
     {
         return;
     }
@@ -441,19 +447,33 @@ void send_session(Res *res, Session *sess)
     // TTL: expires - now
     int max_age = (int)difftime(sess->expires, now);
     if (max_age < 0)
-    {
         return;
-    }
 
-    set_cookie("session", sess->id, max_age);
+    cookie_options_t opt = options ? *options : COOKIE_DEFAULTS;
+
+    opt.path = (options && options->path) ? options->path : COOKIE_DEFAULTS.path;
+    opt.same_site = (options && options->same_site) ? options->same_site : COOKIE_DEFAULTS.same_site;
+    opt.http_only = (options) ? options->http_only : COOKIE_DEFAULTS.http_only;
+    opt.secure = (options) ? options->secure : COOKIE_DEFAULTS.secure;
+    opt.max_age = max_age;
+
+    set_cookie(res, "session", sess->id, &opt);
 }
 
-void delete_session(Res *res, Session *sess)
+void destroy_session(Res *res, Session *sess, cookie_options_t *options)
 {
     if (!res || !sess || sess->id[0] == '\0')
         return;
 
-    free_session(sess);
+    cookie_options_t opt = options ? *options : COOKIE_DEFAULTS;
 
-    set_cookie("session", "", 0);
+    opt.path = (options && options->path) ? options->path : COOKIE_DEFAULTS.path;
+    opt.same_site = (options && options->same_site) ? options->same_site : COOKIE_DEFAULTS.same_site;
+    opt.http_only = (options) ? options->http_only : COOKIE_DEFAULTS.http_only;
+    opt.secure = (options) ? options->secure : COOKIE_DEFAULTS.secure;
+    opt.max_age = 0;
+
+    set_cookie(res, "session", "", &opt);
+
+    free_session(sess);
 }

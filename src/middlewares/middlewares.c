@@ -17,7 +17,7 @@ int body_checker(Req *req, Res *res, Chain *chain)
 int is_auth(Req *req, Res *res, Chain *chain)
 {
     // Get the user session
-    Session *session = get_session(&req->headers);
+    Session *session = get_session(req);
 
     // Always allocate a session context, even if no session data
     auth_context_t *ctx = calloc(1, sizeof(auth_context_t));

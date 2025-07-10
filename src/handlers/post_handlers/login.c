@@ -37,7 +37,7 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data);
 
 void login(Req *req, Res *res)
 {
-    Session *user_session = get_session(&req->headers);
+    Session *user_session = get_session(req);
 
     if (user_session)
     {
@@ -166,6 +166,15 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
         set_session(sess, "is_admin", "true");
     }
 
-    send_session(ctx->res, sess);
+    // The cookie_options must be the same in the logout handler
+    cookie_options_t cookie_options = {
+        .max_age = 3600, // 1 hour
+        .path = "/",
+        .same_site = "Lax",
+        .http_only = true,
+        .secure = true,
+    };
+
+    send_session(ctx->res, sess, &cookie_options);
     send_text(ctx->res, 200, "Login successful");
 }

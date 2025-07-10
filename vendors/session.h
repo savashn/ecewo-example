@@ -42,10 +42,15 @@ void free_session(Session *sess);
 // Function to get the authenticated session from request cookies
 // Extracts the session ID from the cookies in the request headers
 // Returns the session if found and authenticated, NULL otherwise
-Session *get_session(request_t *headers);
+Session *get_session(Req *req);
 
+// Print all the registered sessions to the console
 void print_sessions(void);
-void send_session(Res *res, Session *sess);
-void delete_session(Res *res, Session *sess);
+
+// Send session to the client
+void send_session(Res *res, Session *sess, cookie_options_t *options);
+
+// Delete the session both from the client and the memory
+void destroy_session(Res *res, Session *sess, cookie_options_t *options);
 
 #endif

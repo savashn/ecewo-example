@@ -12,6 +12,17 @@ char *build_connection_string(void)
     const char *db_user = getenv("DB_USER");
     const char *db_password = getenv("DB_PASSWORD");
 
+    if (!db_host)
+        db_host = "";
+    if (!db_port)
+        db_port = "";
+    if (!db_name)
+        db_name = "";
+    if (!db_user)
+        db_user = "";
+    if (!db_password)
+        db_password = "";
+
     static char conninfo[512];
     snprintf(conninfo, sizeof(conninfo),
              "host=%s port=%s dbname=%s user=%s password=%s",

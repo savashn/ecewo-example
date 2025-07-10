@@ -55,7 +55,7 @@ void get_all_users(Req *req, Res *res)
 
 void logout(Req *req, Res *res)
 {
-    Session *sess = get_session(&req->headers);
+    Session *sess = get_session(req);
 
     if (!sess)
     {
@@ -63,7 +63,16 @@ void logout(Req *req, Res *res)
     }
     else
     {
-        delete_session(res, sess);
+        // The cookie_options should be the same as what we use in the login handler
+        cookie_options_t cookie_options = {
+            .max_age = 3600, // 1 hour
+            .path = "/",
+            .same_site = "Lax",
+            .http_only = true,
+            .secure = true,
+        };
+
+        destroy_session(res, sess, &cookie_options);
         send_text(res, 302, "Logged out");
     }
 }

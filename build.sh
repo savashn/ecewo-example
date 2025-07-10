@@ -65,7 +65,7 @@ fi
 
 # Build project
 echo "[INFO] Starting build"
-cmake --build . --config Release
+cmake --build .
 
 # Detect executable
 EXECUTABLE=""
