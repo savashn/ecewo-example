@@ -6,7 +6,7 @@ include(FetchContent)
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG v0.30.1
+    GIT_TAG v0.31.1
 )
 
 FetchContent_MakeAvailable(ecewo)
@@ -81,7 +81,6 @@ else()
     find_package(Sodium REQUIRED)
 
     target_link_libraries(server PRIVATE
-        ecewo
         Sodium::Sodium
     )
 endif()

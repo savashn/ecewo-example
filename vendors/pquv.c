@@ -6,9 +6,12 @@
 // Internal helper functions
 #ifdef _WIN32
 static void on_timer(uv_timer_t *handle);
+static void on_timer_closed(uv_handle_t *handle);
 #else
 static void on_poll(uv_poll_t *handle, int status, int events);
+static void on_poll_closed(uv_handle_t *handle);
 #endif
+
 static void execute_next_query(pg_async_t *pg);
 static void cleanup_query(pg_query_t *query);
 static void handle_error(pg_async_t *pg, const char *error);
@@ -43,6 +46,7 @@ pg_async_t *pquv_create(PGconn *existing_conn, void *data)
     // Setup callbacks and user data
     pg->data = data;
     pg->is_connected = 1;
+    pg->handle_initialized = 0;
 
     // Initialize appropriate handle based on platform
 #ifdef _WIN32
@@ -161,15 +165,27 @@ static void pg_async_cancel(pg_async_t *pg)
     if (!pg)
         return;
 
-    if (pg->is_executing)
+    if (pg->is_executing && pg->handle_initialized)
     {
 #ifdef _WIN32
         uv_timer_stop(&pg->timer);
+        if (!uv_is_closing((uv_handle_t *)&pg->timer))
+        {
+            uv_close((uv_handle_t *)&pg->timer, on_timer_closed);
+        }
 #else
         uv_poll_stop(&pg->poll);
+        if (!uv_is_closing((uv_handle_t *)&pg->poll))
+        {
+            uv_close((uv_handle_t *)&pg->poll, on_poll_closed);
+        }
 #endif
+        pg->handle_initialized = 0;
+    }
 
-        // Get cancel struct and send cancel request
+    // Get cancel struct and send cancel request
+    if (pg->conn && pg->is_executing)
+    {
         PGcancel *cancel = PQgetCancel(pg->conn);
         if (cancel)
         {
@@ -177,9 +193,9 @@ static void pg_async_cancel(pg_async_t *pg)
             PQcancel(cancel, errbuf, sizeof(errbuf));
             PQfreeCancel(cancel);
         }
-
-        pg->is_executing = 0;
     }
+
+    pg->is_executing = 0;
 
     // Clear query queue
     pg_query_t *query = pg->query_queue;
@@ -200,19 +216,76 @@ static void pg_async_destroy(pg_async_t *pg)
 
     pg_async_cancel(pg);
 
-    // Only close connection if we own it
+    // If handle is initialized, close it
+    if (pg->handle_initialized)
+    {
+#ifdef _WIN32
+        if (!uv_is_closing((uv_handle_t *)&pg->timer))
+        {
+            uv_close((uv_handle_t *)&pg->timer, on_timer_closed);
+        }
+#else
+        if (!uv_is_closing((uv_handle_t *)&pg->poll))
+        {
+            uv_close((uv_handle_t *)&pg->poll, on_poll_closed);
+        }
+#endif
+    }
+    else
+    {
+        // No handle initialized, clean up directly
+        if (pg->conn && pg->owns_connection)
+        {
+            PQfinish(pg->conn);
+        }
+        if (pg->error_message)
+        {
+            free(pg->error_message);
+        }
+        free(pg);
+    }
+}
+
+// Handle close callbacks
+#ifdef _WIN32
+static void on_timer_closed(uv_handle_t *handle)
+{
+    if (!handle || !handle->data)
+        return;
+
+    pg_async_t *pg = (pg_async_t *)handle->data;
+
+    // Final cleanup
     if (pg->conn && pg->owns_connection)
     {
         PQfinish(pg->conn);
     }
-
     if (pg->error_message)
     {
         free(pg->error_message);
     }
-
     free(pg);
 }
+#else
+static void on_poll_closed(uv_handle_t *handle)
+{
+    if (!handle || !handle->data)
+        return;
+
+    pg_async_t *pg = (pg_async_t *)handle->data;
+
+    // Final cleanup
+    if (pg->conn && pg->owns_connection)
+    {
+        PQfinish(pg->conn);
+    }
+    if (pg->error_message)
+    {
+        free(pg->error_message);
+    }
+    free(pg);
+}
+#endif
 
 // Execute the next query in the queue
 static void execute_next_query(pg_async_t *pg)
@@ -223,6 +296,15 @@ static void execute_next_query(pg_async_t *pg)
         pg->is_executing = 0;
 
         // Always auto-cleanup when all queries are done
+        pg_async_destroy(pg);
+        return;
+    }
+
+    // Check if we're being shut down
+    extern volatile int shutdown_requested;
+    if (shutdown_requested)
+    {
+        pg->is_executing = 0;
         pg_async_destroy(pg);
         return;
     }
@@ -260,16 +342,18 @@ static void execute_next_query(pg_async_t *pg)
     }
 
 #ifdef _WIN32
-
-    int init_result = uv_timer_init(uv_default_loop(), &pg->timer);
-    if (init_result != 0)
+    if (!pg->handle_initialized)
     {
-        printf("execute_next_query: uv_timer_init failed: %s\n", uv_strerror(init_result));
-        handle_error(pg, uv_strerror(init_result));
-        return;
+        int init_result = uv_timer_init(uv_default_loop(), &pg->timer);
+        if (init_result != 0)
+        {
+            printf("execute_next_query: uv_timer_init failed: %s\n", uv_strerror(init_result));
+            handle_error(pg, uv_strerror(init_result));
+            return;
+        }
+        pg->handle_initialized = 1;
+        pg->timer.data = pg;
     }
-
-    pg->timer.data = pg;
 
     int start_result = uv_timer_start(&pg->timer, on_timer, 10, 10);
     if (start_result != 0)
@@ -289,12 +373,17 @@ static void execute_next_query(pg_async_t *pg)
         return;
     }
 
-    int init_result = uv_poll_init(uv_default_loop(), &pg->poll, sock);
-    if (init_result != 0)
+    if (!pg->handle_initialized)
     {
-        printf("execute_next_query: uv_poll_init failed: %s\n", uv_strerror(init_result));
-        handle_error(pg, uv_strerror(init_result));
-        return;
+        int init_result = uv_poll_init(uv_default_loop(), &pg->poll, sock);
+        if (init_result != 0)
+        {
+            printf("execute_next_query: uv_poll_init failed: %s\n", uv_strerror(init_result));
+            handle_error(pg, uv_strerror(init_result));
+            return;
+        }
+
+        pg->handle_initialized = 1;
     }
 
     int start_result = uv_poll_start(&pg->poll, UV_READABLE | UV_WRITABLE, on_poll);
@@ -320,11 +409,25 @@ static void on_timer(uv_timer_t *handle)
 
     pg_async_t *pg = (pg_async_t *)handle->data;
 
+    // Check for shutdown
+    extern volatile int shutdown_requested;
+    if (shutdown_requested)
+    {
+        uv_timer_stop(&pg->timer);
+        if (!uv_is_closing((uv_handle_t *)&pg->timer))
+        {
+            uv_close((uv_handle_t *)&pg->timer, on_timer_closed);
+        }
+        pg->handle_initialized = 0;
+        pg->is_executing = 0;
+        pg_async_destroy(pg);
+        return;
+    }
+
     // Consume input from the connection
     if (!PQconsumeInput(pg->conn))
     {
         printf("on_timer: PQconsumeInput failed: %s\n", PQerrorMessage(pg->conn));
-        uv_timer_stop(&pg->timer);
         handle_error(pg, PQerrorMessage(pg->conn));
         return;
     }
@@ -335,6 +438,7 @@ static void on_timer(uv_timer_t *handle)
         return;
     }
 
+    // Stop and close timer before processing results
     uv_timer_stop(&pg->timer);
 
     PGresult *result;
@@ -378,6 +482,21 @@ static void on_poll(uv_poll_t *handle, int status, int events)
 
     pg_async_t *pg = (pg_async_t *)handle->data;
 
+    // Check for shutdown
+    extern volatile int shutdown_requested;
+    if (shutdown_requested)
+    {
+        uv_poll_stop(&pg->poll);
+        if (!uv_is_closing((uv_handle_t *)&pg->poll))
+        {
+            uv_close((uv_handle_t *)&pg->poll, on_poll_closed);
+        }
+        pg->handle_initialized = 0;
+        pg->is_executing = 0;
+        pg_async_destroy(pg);
+        return;
+    }
+
     if (status < 0)
     {
         printf("on_poll: Poll error: %s\n", uv_strerror(status));
@@ -396,6 +515,9 @@ static void on_poll(uv_poll_t *handle, int status, int events)
     {
         return;
     }
+
+    // Stop and close poll before processing results
+    uv_poll_stop(&pg->poll);
 
     PGresult *result;
     while ((result = PQgetResult(pg->conn)) != NULL)
@@ -422,7 +544,6 @@ static void on_poll(uv_poll_t *handle, int status, int events)
         PQclear(result);
     }
 
-    uv_poll_stop(&pg->poll);
     cleanup_query(pg->current_query);
     pg->current_query = NULL;
     execute_next_query(pg);
@@ -462,11 +583,23 @@ static void handle_error(pg_async_t *pg, const char *error)
 
     if (pg->is_executing)
     {
+        if (pg->handle_initialized)
+        {
 #ifdef _WIN32
-        uv_timer_stop(&pg->timer);
+            uv_timer_stop(&pg->timer);
+            if (!uv_is_closing((uv_handle_t *)&pg->timer))
+            {
+                uv_close((uv_handle_t *)&pg->timer, on_timer_closed);
+            }
 #else
-        uv_poll_stop(&pg->poll);
+            uv_poll_stop(&pg->poll);
+            if (!uv_is_closing((uv_handle_t *)&pg->poll))
+            {
+                uv_close((uv_handle_t *)&pg->poll, on_poll_closed);
+            }
 #endif
+            pg->handle_initialized = 0;
+        }
         pg->is_executing = 0;
     }
 

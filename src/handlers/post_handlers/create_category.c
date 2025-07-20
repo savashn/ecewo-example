@@ -31,8 +31,7 @@ static void free_ctx(ctx_t *ctx)
     free(ctx);
 }
 
-static void on_query_category(pg_async_t *pg, PGresult *result, void *data);
-static void insert_category_result(pg_async_t *pg, PGresult *result, void *data);
+static void on_category_insert(pg_async_t *pg, PGresult *result, void *data);
 
 void create_category(Req *req, Res *res)
 {
@@ -62,28 +61,36 @@ void create_category(Req *req, Res *res)
     ctx_t *ctx = calloc(1, sizeof(ctx_t));
     if (!ctx)
     {
+        free(slug);
         cJSON_Delete(json);
         send_text(res, 500, "Memory allocation error");
         return;
     }
 
     Res *copy = copy_res(res);
+    if (!copy)
+    {
+        free(slug);
+        free_ctx(ctx);
+        cJSON_Delete(json);
+        send_text(res, 500, "Response copy failed");
+        return;
+    }
+
     ctx->res = copy;
     ctx->category = strdup(category);
     ctx->slug = strdup(slug);
     ctx->author_id = strdup(author_id);
 
     free(slug);
+    cJSON_Delete(json);
 
-    if (!ctx->category || !ctx->author_id)
+    if (!ctx->category || !ctx->slug || !ctx->author_id)
     {
         free_ctx(ctx);
-        cJSON_Delete(json);
         send_text(res, 500, "Memory allocation failed");
         return;
     }
-
-    cJSON_Delete(json);
 
     pg_async_t *pg = pquv_create(db, ctx);
     if (!pg)
@@ -93,10 +100,17 @@ void create_category(Req *req, Res *res)
         return;
     }
 
-    const char *select_sql = "SELECT 1 FROM categories WHERE slug = $1";
-    const char *params[] = {ctx->slug};
+    // TEK QUERY ile hem check hem insert yap
+    const char *conditional_insert_sql =
+        "INSERT INTO categories (category, slug, author_id) "
+        "SELECT $1, $2, $3 "
+        "WHERE NOT EXISTS ("
+        "    SELECT 1 FROM categories WHERE slug = $2"
+        ");";
 
-    int query_result = pquv_queue(pg, select_sql, 1, params, on_query_category, ctx);
+    const char *params[] = {ctx->category, ctx->slug, ctx->author_id};
+
+    int query_result = pquv_queue(pg, conditional_insert_sql, 3, params, on_category_insert, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
@@ -113,15 +127,17 @@ void create_category(Req *req, Res *res)
         send_text(res, 500, "Failed to execute query");
         return;
     }
+
+    printf("create_category: Conditional INSERT query started\n");
 }
 
-static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
+static void on_category_insert(pg_async_t *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
     if (!ctx || !ctx->res)
     {
-        printf("on_query_category: Invalid context\n");
+        printf("on_category_insert: Invalid context\n");
         if (ctx)
             free_ctx(ctx);
         return;
@@ -130,74 +146,42 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
     if (!result)
     {
         printf("ERROR: Result is NULL\n");
+        send_text(ctx->res, 500, "Database error");
         free_ctx(ctx);
         return;
     }
 
     ExecStatusType status = PQresultStatus(result);
 
-    if (status != PGRES_TUPLES_OK)
+    if (status != PGRES_COMMAND_OK)
     {
-        printf("on_query_category: DB check failed: %s\n", PQresultErrorMessage(result));
-        send_text(ctx->res, 500, "Database check failed");
+        printf("on_category_insert: DB operation failed: %s\n", PQresultErrorMessage(result));
+        send_text(ctx->res, 500, "Database operation failed");
         free_ctx(ctx);
         return;
     }
 
-    // Check if category with this slug already exists
-    if (PQntuples(result) > 0)
+    // Check how many rows were affected
+    char *affected_rows = PQcmdTuples(result);
+    int rows_inserted = atoi(affected_rows);
+
+    if (rows_inserted == 0)
     {
-        printf("on_query_category: Category with this slug already exists\n");
+        // No rows inserted = category already exists
+        printf("on_category_insert: Category '%s' already exists\n", ctx->category);
         send_text(ctx->res, 409, "This category already exists");
-        free_ctx(ctx);
-        return;
     }
-
-    const char *insert_params[3] = {
-        ctx->category,
-        ctx->slug,
-        ctx->author_id,
-    };
-
-    const char *insert_sql =
-        "INSERT INTO categories "
-        "(category, slug, author_id) "
-        "VALUES ($1, $2, $3);";
-
-    // Queue the async insert query using the same pg context
-    if (pquv_queue(pg, insert_sql, 3, insert_params, insert_category_result, ctx) != 0)
+    else if (rows_inserted == 1)
     {
-        send_text(ctx->res, 500, "Failed to queue insert query");
-        free_ctx(ctx);
-        return;
-    }
-
-    printf("on_query_category: Insert operation queued\n");
-}
-
-static void insert_category_result(pg_async_t *pg, PGresult *result, void *data)
-{
-    ctx_t *ctx = (ctx_t *)data;
-
-    if (!ctx || !ctx->res)
-    {
-        printf("insert_category_result: Invalid context\n");
-        if (ctx)
-            free_ctx(ctx);
-        return;
-    }
-
-    ExecStatusType status = PQresultStatus(result);
-
-    if (status == PGRES_COMMAND_OK)
-    {
-        printf("insert_category_result: Category created successfully\n");
+        // One row inserted = success
+        printf("on_category_insert: Category '%s' created successfully\n", ctx->category);
         send_text(ctx->res, 201, "Category created!");
     }
     else
     {
-        printf("insert_category_result: DB insert failed: %s\n", PQresultErrorMessage(result));
-        send_text(ctx->res, 500, "DB insert failed");
+        // Unexpected result
+        printf("on_category_insert: Unexpected result: %d rows affected\n", rows_inserted);
+        send_text(ctx->res, 500, "Unexpected database result");
     }
 
     free_ctx(ctx);

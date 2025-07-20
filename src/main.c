@@ -7,6 +7,15 @@
 #include "session.h"
 #include "middlewares.h"
 
+void destroy_app()
+{
+    close_db();
+    reset_sessions();
+    reset_middleware();
+    reset_router();
+    reset_cors();
+}
+
 int main()
 {
     env_load("..", false);
@@ -36,12 +45,7 @@ int main()
 
     register_routers();
 
+    shutdown_hook(destroy_app);
     ecewo(PORT);
-
-    reset_sessions();
-    reset_router();
-    close_db();
-    reset_cors();
-    reset_middleware();
     return 0;
 }

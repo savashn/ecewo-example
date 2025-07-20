@@ -54,8 +54,6 @@ void del_category(Req *req, Res *res)
 
     const char *params[] = {auth_ctx->id, cat_slug};
 
-    printf("auth id: %s", auth_ctx->id);
-
     int qr = pquv_queue(pg, delete_sql, 2, params, on_cat_deleted, ctx);
     if (qr != 0)
     {

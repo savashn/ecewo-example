@@ -1,11 +1,10 @@
 #include "dotenv.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 
 char *build_connection_string(void)
 {
-    env_load("../..", false);
-
     const char *db_host = getenv("DB_HOST");
     const char *db_port = getenv("DB_PORT");
     const char *db_name = getenv("DB_NAME");

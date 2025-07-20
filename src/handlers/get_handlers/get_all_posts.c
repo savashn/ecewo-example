@@ -43,7 +43,7 @@ void get_all_posts(Req *req, Res *res)
     {
         printf("get_all_posts: Failed to create async context\n");
         send_text(res, 500, "Failed to create async context");
-        free(ctx);
+        free_ctx(ctx);
         return;
     }
 
@@ -147,21 +147,24 @@ static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data)
             char *slugs_copy = strdup(category_slugs_str);
             char *ids_copy = strdup(category_ids_str);
 
-            char *category_token = strtok(categories_copy, ",");
-            char *slug_token = strtok(slugs_copy, ",");
-            char *id_token = strtok(ids_copy, ",");
+            char *cat_tok, *slug_tok, *id_tok;
+            char *cat_saveptr, *slug_saveptr, *id_saveptr;
 
-            while (category_token && slug_token && id_token)
+            cat_tok = strtok_r(categories_copy, ",", &cat_saveptr);
+            slug_tok = strtok_r(slugs_copy, ",", &slug_saveptr);
+            id_tok = strtok_r(ids_copy, ",", &id_saveptr);
+
+            while (cat_tok && slug_tok && id_tok)
             {
                 cJSON *category_obj = cJSON_CreateObject();
-                cJSON_AddNumberToObject(category_obj, "id", atoi(id_token));
-                cJSON_AddStringToObject(category_obj, "category", category_token);
-                cJSON_AddStringToObject(category_obj, "slug", slug_token);
+                cJSON_AddNumberToObject(category_obj, "id", atoi(id_tok));
+                cJSON_AddStringToObject(category_obj, "category", cat_tok);
+                cJSON_AddStringToObject(category_obj, "slug", slug_tok);
                 cJSON_AddItemToArray(categories_array, category_obj);
 
-                category_token = strtok(NULL, ",");
-                slug_token = strtok(NULL, ",");
-                id_token = strtok(NULL, ",");
+                cat_tok = strtok_r(NULL, ",", &cat_saveptr);
+                slug_tok = strtok_r(NULL, ",", &slug_saveptr);
+                id_tok = strtok_r(NULL, ",", &id_saveptr);
             }
 
             free(categories_copy);

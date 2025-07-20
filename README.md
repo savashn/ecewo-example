@@ -3,12 +3,12 @@
 This is an example blog app built with [Ecewo](https://github.com/savashn/ecewo).
 
 Using dependencies:
-- [pquv](https://github.com/savashn/pquv) for integration of async Postgres queries with Ecewo
-- [ecewo-session](https://github.com/savashn/ecewo-session) for authentication and authorization
+- [pquv](https://github.com/savashn/pquv) for integration of async PostgreSQL queries with Ecewo, based on [libuv](https://libuv.org/) and [libpq](https://www.postgresql.org/docs/current/libpq.html)
+- [ecewo-session](https://github.com/savashn/ecewo-session) for session-based authentication
 - [cJSON](https://github.com/DaveGamble/cJSON) for handling JSON objects
 - [slugify-c](https://github.com/savashn/slugify-c) for creating URL-friendly ASCII characters
 - [dotenv-c](https://github.com/Isty001/dotenv-c) for managing environment variables
-- [libsodium](https://github.com/jedisct1/libsodium) for password hashing
+- [libsodium](https://github.com/jedisct1/libsodium) for password hashing with `argon2`
 
 <hr />
 
