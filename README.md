@@ -1,6 +1,6 @@
 # ecewo-example
 
-This is an example blog app built with [Ecewo](https://github.com/savashn/ecewo).
+This is an example blog app built with [Ecewo](https://github.com/savashn/ecewo) and PostgreSQL.
 
 Using dependencies:
 - [pquv](https://github.com/savashn/pquv) for integration of async PostgreSQL queries with Ecewo, based on [libuv](https://libuv.org/) and [libpq](https://www.postgresql.org/docs/current/libpq.html)
