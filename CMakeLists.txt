@@ -6,7 +6,7 @@ include(FetchContent)
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG v0.31.2
+    GIT_TAG v0.31.3
 )
 
 FetchContent_MakeAvailable(ecewo)
@@ -78,9 +78,10 @@ if(WIN32)
         "${SODIUM_ROOT}/lib/libsodium.a"
     )
 else()
-    find_package(Sodium REQUIRED)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(SODIUM REQUIRED libsodium)
 
-    target_link_libraries(server PRIVATE
-        Sodium::Sodium
-    )
+    target_include_directories(server PRIVATE ${SODIUM_INCLUDE_DIRS})
+    target_link_libraries(server PRIVATE ${SODIUM_LIBRARIES})
+    target_compile_options(server PRIVATE ${SODIUM_CFLAGS_OTHER})
 endif()

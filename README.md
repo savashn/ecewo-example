@@ -15,22 +15,16 @@ Using dependencies:
 ## Table of Contents
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Endpoints](#endpoints)
 - [Environment Variables](#environment-variables)
+- [Endpoints](#endpoints)
 
 ## Requirements
 
 - CMake version 3.14 or higher
 - [libpq](https://www.postgresql.org/docs/current/libpq.html)
-- [libsodium](https://github.com/jedisct1/libsodium) (Not needed on Windows, as it's already built-in)
+- [libsodium](https://github.com/jedisct1/libsodium) (Not required on Windows, as it's already included in the `vendors/libsodium-win64` folder)
 
 <br />
-
-> **NOTE**
->
-> This project is intended to be cross-platform, but has only been tested on MSYS2.
-> If you're using Windows with MSYS2 and already have PostgreSQL installed on your system, make sure it's also installed within the MSYS2 environment.
-> If not, you can install it by running: `pacman -S mingw-w64-ucrt-x86_64-postgresql`
 
 ## Installation
 
@@ -62,6 +56,21 @@ Manually building on Linux/macOS:
 
 ```shell
 mkdir build && cd build && cmake .. && cmake --build . && ./server
+```
+
+> [!WARNING]
+> Before compiling the program, create a `.env` file in the project's root directory and define the following environment variables. Otherwise, you may encounter a segmentation fault at startup.
+
+### Environment Variables
+
+```
+PORT
+CORS_ORIGIN
+DB_HOST
+DB_PORT
+DB_NAME
+DB_USER
+DB_PASSWORD
 ```
 
 ## Endpoints
@@ -128,16 +137,4 @@ Here are what `POST` and `PUT` endpoints wait for:
     "content": "John Doe's edited example post content",
     "categories": []
 }
-```
-
-## Environment Variables
-
-```
-PORT
-CORS_ORIGIN
-DB_HOST
-DB_PORT
-DB_NAME
-DB_USER
-DB_PASSWORD
 ```
