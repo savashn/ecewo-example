@@ -12,7 +12,7 @@ static void free_ctx(ctx_t *ctx)
         return;
 
     if (ctx->res)
-        free(ctx->res);
+        destroy_res(ctx->res);
     free(ctx);
 }
 

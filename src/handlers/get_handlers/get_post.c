@@ -127,8 +127,7 @@ static void on_query_posts(pg_async_t *pg, PGresult *result, void *data)
 
     if (PQntuples(result) == 0)
     {
-        printf("No post found\n");
-        send_text(ctx->res, 404, "Post not found");
+        send_text(ctx->res, NOT_FOUND, "Post not found");
         free_ctx(ctx);
         return;
     }
@@ -181,7 +180,7 @@ static void on_query_posts(pg_async_t *pg, PGresult *result, void *data)
     cJSON_AddItemToObject(response, "categories", arr);
 
     char *json_str = cJSON_PrintUnformatted(response);
-    send_json(ctx->res, 200, json_str);
+    send_json(ctx->res, OK, json_str);
 
     free(json_str);
     cJSON_Delete(response);

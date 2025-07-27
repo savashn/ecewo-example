@@ -27,7 +27,7 @@ void get_posts_by_cat(Req *req, Res *res)
 
     if (!category || strlen(category) == 0)
     {
-        send_text(res, 400, "Category parameter is required");
+        send_text(res, BAD_REQUEST, "Category parameter is required");
         return;
     }
 
