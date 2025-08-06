@@ -1,6 +1,5 @@
 #include "handlers.h"
 #include "context.h"
-#include "json_helper.h"
 
 typedef struct
 {
@@ -82,10 +81,15 @@ static void on_result(pg_async_t *pg, PGresult *result, void *data)
 
     cJSON *resp = cJSON_CreateObject();
 
-    ADD_INT(resp, id);
-    ADD_STR(resp, name);
-    ADD_STR(resp, email);
-    ADD_STR(resp, about);
+    // Add integer field
+    cJSON_AddNumberToObject(resp, "id", atoi(PQgetvalue(result, 0, PQfnumber(result, "id"))));
+
+    // Add string fields
+    cJSON_AddStringToObject(resp, "name", PQgetvalue(result, 0, PQfnumber(result, "name")));
+    cJSON_AddStringToObject(resp, "email", PQgetvalue(result, 0, PQfnumber(result, "email")));
+    cJSON_AddStringToObject(resp, "about", PQgetvalue(result, 0, PQfnumber(result, "about")));
+
+    // Add boolean field
     cJSON_AddBoolToObject(resp, "is_author", ctx->is_author);
 
     char *json_str = cJSON_PrintUnformatted(resp);

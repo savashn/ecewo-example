@@ -10,8 +10,6 @@ Using dependencies:
 - [dotenv-c](https://github.com/Isty001/dotenv-c) for managing environment variables
 - [libsodium](https://github.com/jedisct1/libsodium) for password hashing with `argon2`
 
-<hr />
-
 ## Table of Contents
 - [Requirements](#requirements)
 - [Installation](#installation)
@@ -24,27 +22,48 @@ Using dependencies:
 - [libpq](https://www.postgresql.org/docs/current/libpq.html)
 - [libsodium](https://github.com/jedisct1/libsodium) (Not required on Windows, as it's already included in the `vendors/libsodium-win64` folder)
 
-<br />
-
 ## Installation
 
-Clone the repo:
+### 1. Clone the repo:
 
 ```shell
 git clone https://github.com/savashn/ecewo-example.git
+cd ecewo-example
 ```
 
-Build:
+### 2.1 Build via [Ecewo-CLI](https://github.com/savashn/ecewo-cli)
+
+If [Ecewo-CLI](https://github.com/savashn/ecewo-cli) is already installed on your machine, you can build with the commands below:
+
+```
+ecewo build dev
+ecewo run
+```
+
+If you make some changes on the project and would lite to build from scratch:
+
+```
+ecewo rebuild dev
+ecewo run
+```
+
+### 2.2 Build via Bash Script
+
+If [Ecewo-CLI](https://github.com/savashn/ecewo-cli) is not installed, you can build with the following command:
 
 ```shell
 ./build.sh
 ```
 
-Build from scratch:
+If you make some changes on the project and would lite to build from scratch:
 
 ```shell
 ./build.sh rebuild
 ```
+
+## 2.3 Build Manually
+
+If you prefer to build manually, run the suitable command:
 
 Manually building on Windows:
 

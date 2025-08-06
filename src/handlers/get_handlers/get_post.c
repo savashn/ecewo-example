@@ -1,6 +1,5 @@
 #include "handlers.h"
 #include "context.h"
-#include "json_helper.h"
 
 typedef struct
 {
@@ -134,16 +133,21 @@ static void on_query_posts(pg_async_t *pg, PGresult *result, void *data)
 
     cJSON *response = cJSON_CreateObject();
 
-    ADD_INT(response, id);
-    ADD_STR(response, header);
-    ADD_STR(response, slug);
-    ADD_STR(response, content);
-    ADD_INT(response, reading_time);
-    ADD_INT(response, author_id);
-    ADD_STR(response, username);
-    ADD_STR(response, created_at);
-    ADD_STR(response, updated_at);
-    ADD_BOOL(response, is_hidden);
+    // Add integer fields
+    cJSON_AddNumberToObject(response, "id", atoi(PQgetvalue(result, 0, PQfnumber(result, "id"))));
+    cJSON_AddNumberToObject(response, "reading_time", atoi(PQgetvalue(result, 0, PQfnumber(result, "reading_time"))));
+    cJSON_AddNumberToObject(response, "author_id", atoi(PQgetvalue(result, 0, PQfnumber(result, "author_id"))));
+
+    // Add string fields
+    cJSON_AddStringToObject(response, "header", PQgetvalue(result, 0, PQfnumber(result, "header")));
+    cJSON_AddStringToObject(response, "slug", PQgetvalue(result, 0, PQfnumber(result, "slug")));
+    cJSON_AddStringToObject(response, "content", PQgetvalue(result, 0, PQfnumber(result, "content")));
+    cJSON_AddStringToObject(response, "username", PQgetvalue(result, 0, PQfnumber(result, "username")));
+    cJSON_AddStringToObject(response, "created_at", PQgetvalue(result, 0, PQfnumber(result, "created_at")));
+    cJSON_AddStringToObject(response, "updated_at", PQgetvalue(result, 0, PQfnumber(result, "updated_at")));
+
+    // Add boolean field
+    cJSON_AddBoolToObject(response, "is_hidden", strcmp(PQgetvalue(result, 0, PQfnumber(result, "is_hidden")), "t") == 0);
 
     char *cats = PQgetvalue(result, 0, PQfnumber(result, "categories"));
     char *slugs = PQgetvalue(result, 0, PQfnumber(result, "category_slugs"));
