@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include "middlewares.h"
 #include "session.h"
 #include "cJSON.h"
