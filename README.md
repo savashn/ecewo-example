@@ -10,12 +10,6 @@ Using dependencies:
 - [dotenv-c](https://github.com/Isty001/dotenv-c) for managing environment variables
 - [libsodium](https://github.com/jedisct1/libsodium) for password hashing with `argon2`
 
-## Table of Contents
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Environment Variables](#environment-variables)
-- [Endpoints](#endpoints)
-
 ## Requirements
 
 - CMake version 3.14 or higher
@@ -31,7 +25,23 @@ git clone https://github.com/savashn/ecewo-example.git
 cd ecewo-example
 ```
 
-### 2.1 Build via [Ecewo-CLI](https://github.com/savashn/ecewo-cli)
+### 2. Configure .env
+
+Before compiling the program, create a `.env` file in the project's root directory and define the following environment variables. Otherwise, you may encounter a segmentation fault at startup.
+
+```
+PORT
+CORS_ORIGIN
+DB_HOST
+DB_PORT
+DB_NAME
+DB_USER
+DB_PASSWORD
+```
+
+### 3. Build and run the project
+
+### 3.1 Build via [Ecewo-CLI](https://github.com/savashn/ecewo-cli)
 
 If [Ecewo-CLI](https://github.com/savashn/ecewo-cli) is already installed on your machine, you can build with the commands below:
 
@@ -47,7 +57,7 @@ ecewo rebuild dev
 ecewo run
 ```
 
-### 2.2 Build via Bash Script
+### 3.2 Build via Bash Script
 
 If [Ecewo-CLI](https://github.com/savashn/ecewo-cli) is not installed, you can build with the following command:
 
@@ -61,7 +71,7 @@ If you make some changes on the project and would lite to build from scratch:
 ./build.sh rebuild
 ```
 
-## 2.3 Build Manually
+### 3.3 Build Manually
 
 If you prefer to build manually, run the suitable command:
 
@@ -75,21 +85,6 @@ Manually building on Linux/macOS:
 
 ```shell
 mkdir build && cd build && cmake .. && cmake --build . && ./server
-```
-
-> [!WARNING]
-> Before compiling the program, create a `.env` file in the project's root directory and define the following environment variables. Otherwise, you may encounter a segmentation fault at startup.
-
-### Environment Variables
-
-```
-PORT
-CORS_ORIGIN
-DB_HOST
-DB_PORT
-DB_NAME
-DB_USER
-DB_PASSWORD
 ```
 
 ## Endpoints
