@@ -6,7 +6,7 @@ include(FetchContent)
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG main
+    GIT_TAG v1.1.0
 )
 
 FetchContent_MakeAvailable(ecewo)

@@ -15,6 +15,13 @@ int body_checker(Req *req, Res *res, Chain *chain)
     return next(chain, req, res);
 }
 
+static bool string_to_bool(const char *str)
+{
+    if (!str)
+        return false;
+    return (strcmp(str, "true") == 0 || strcmp(str, "1") == 0);
+}
+
 int is_auth(Req *req, Res *res, Chain *chain)
 {
     // Get the user session
@@ -28,41 +35,32 @@ int is_auth(Req *req, Res *res, Chain *chain)
         return 0;
     }
 
-    if (session && session->data)
+    if (session)
     {
-        // Parse session JSON once (session->data is a JSON string)
-        cJSON *session_json = cJSON_Parse(session->data);
-        if (!session_json)
+        char *id = get_session_value(session, "id");
+        char *name = get_session_value(session, "name");
+        char *username = get_session_value(session, "username");
+        char *is_admin_str = get_session_value(session, "is_admin");
+
+        if (!id || !name || !username)
         {
             free(ctx);
-            send_text(res, 500, "Error: Failed to parse session data");
-            return 0;
-        }
 
-        cJSON *id_item = cJSON_GetObjectItem(session_json, "id");
-        cJSON *name_item = cJSON_GetObjectItem(session_json, "name");
-        cJSON *username_item = cJSON_GetObjectItem(session_json, "username");
-        cJSON *admin_item = cJSON_GetObjectItem(session_json, "is_admin");
+            free(id);
+            free(name);
+            free(username);
+            free(is_admin_str);
 
-        if (!id_item || !name_item || !username_item)
-        {
-            cJSON_Delete(session_json);
-            free(ctx);
             send_text(res, 500, "Error: Incomplete session data");
             return 0;
         }
 
-        ctx->id = strdup(id_item->valuestring);
-        ctx->name = strdup(name_item->valuestring);
-        ctx->username = strdup(username_item->valuestring);
-        ctx->is_admin = false;
-        if (admin_item && cJSON_IsString(admin_item))
-        {
-            if (strcmp(admin_item->valuestring, "true") == 0)
-                ctx->is_admin = true;
-        }
+        ctx->id = id;
+        ctx->name = name;
+        ctx->username = username;
+        ctx->is_admin = string_to_bool(is_admin_str);
 
-        cJSON_Delete(session_json);
+        free(is_admin_str);
     }
     else
     {
@@ -72,7 +70,7 @@ int is_auth(Req *req, Res *res, Chain *chain)
         ctx->is_admin = false;
     }
 
-    // Attach context to request; cleanup will free cJSON and ctx
+    // Attach context to request; cleanup will free ctx and strings
     set_context(req, ctx, sizeof(*ctx), cleanup_auth_ctx);
 
     // Continue to next handler in chain

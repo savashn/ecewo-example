@@ -1,7 +1,9 @@
 #ifndef SESSION_H
 #define SESSION_H
 
-#include "ecewo.h"
+#include <time.h>
+#include <stdint.h>
+#include "router.h"
 #include "cookie.h"
 
 #define SESSION_ID_LEN 32       // Length of the session ID (32 characters)
@@ -11,43 +13,48 @@
 typedef struct
 {
     char id[SESSION_ID_LEN + 1]; // Unique session ID (32 bytes + null terminator)
-    char *data;                  // Data associated with the session (e.g., "Welcome message")
+    char *data;                  // Data associated with the session (JSON format)
     time_t expires;              // Expiration time of the session (UNIX timestamp)
 } Session;
 
-// Initialize the session system with specified capacity
+// Initialize the session system with default capacity
+// Returns: 1 on success, 0 on failure
 int init_sessions(void);
 
 // Clean up and free all session resources
 void reset_sessions(void);
 
-// Function to create a new session
-// Creates a new session, generates a session ID, and initializes session data
-// Returns the session ID if creation is successful, NULL otherwise
+// Create a new session with specified max age in seconds
+// Returns: Pointer to new session on success, NULL on failure
 Session *create_session(int max_age);
 
-// Function to find a session by its ID
-// Searches for a session using the provided session ID
-// Returns a pointer to the session if found and not expired, NULL otherwise
+// Find a session by its ID
+// Returns: Pointer to session if found and not expired, NULL otherwise
 Session *find_session(const char *id);
 
-// Function to set a key-value pair in the session's data (stored as JSON)
-// Updates the session data (JSON format) with the given key and value
+// Set a key-value pair in the session's data (stored as JSON)
+// Properly escapes JSON special characters
+// Parameters:
+//   sess: Session to modify
+//   key: Key name (will be JSON escaped)
+//   value: Value (will be JSON escaped)
 void set_session(Session *sess, const char *key, const char *value);
 
-// Function to free a session and its associated resources
+char *get_session_value(Session *sess, const char *key);
+void remove_session_value(Session *sess, const char *key);
+
+// Free a session and its associated resources
 // Clears session ID, expiration time, and frees session data
 void free_session(Session *sess);
 
-// Function to get the authenticated session from request cookies
-// Extracts the session ID from the cookies in the request headers
-// Returns the session if found and authenticated, NULL otherwise
+// Get the authenticated session from request cookies
+// Returns: Session if found and authenticated, NULL otherwise
 Session *get_session(Req *req);
 
-// Print all the registered sessions to the console
+// Print all registered sessions to stdout (debug purposes)
 void print_sessions(void);
 
-// Send session to the client
+// Send session cookie to the client
 void send_session(Res *res, Session *sess, cookie_options_t *options);
 
 // Delete the session both from the client and the memory
