@@ -100,7 +100,6 @@ void create_category(Req *req, Res *res)
         return;
     }
 
-    // TEK QUERY ile hem check hem insert yap
     const char *conditional_insert_sql =
         "INSERT INTO categories (category, slug, author_id) "
         "SELECT $1, $2, $3 "
