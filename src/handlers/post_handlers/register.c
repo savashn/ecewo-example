@@ -5,6 +5,7 @@
 // Structure to hold request context for async operations
 typedef struct
 {
+    Arena *arena;
     Res *res;
     char *name;
     char *username;
@@ -13,28 +14,6 @@ typedef struct
     char *about;
     char *hashpw;
 } ctx_t;
-
-static void cleanup(ctx_t *ctx)
-{
-    if (!ctx)
-        return;
-
-    if (ctx->res)
-        destroy_res(ctx->res);
-    if (ctx->name)
-        free(ctx->name);
-    if (ctx->username)
-        free(ctx->username);
-    if (ctx->password)
-        free(ctx->password);
-    if (ctx->email)
-        free(ctx->email);
-    if (ctx->about)
-        free(ctx->about);
-    if (ctx->hashpw)
-        free(ctx->hashpw);
-    free(ctx);
-}
 
 // Callback functions
 static void check_user_exists(pg_async_t *pg, PGresult *result, void *data);
@@ -71,28 +50,46 @@ void add_user(Req *req, Res *res)
     const char *email = j_email->valuestring;
     const char *about = cJSON_IsString(j_about) ? j_about->valuestring : "";
 
-    // Create context to hold all the data for async operation
-    ctx_t *ctx = calloc(1, sizeof(ctx_t));
-    if (!ctx)
-    {
+    // Create separate arena for async operation
+    Arena *async_arena = calloc(1, sizeof(Arena));
+    if (!async_arena) {
         cJSON_Delete(json);
-        send_text(res, 500, "Memory allocation failed");
+        send_text(res, 500, "Arena allocation failed");
         return;
     }
 
-    Res *copy = copy_res(res);
-    ctx->res = copy;
+    // Create context to hold all the data for async operation
+    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
+    if (!ctx) {
+        arena_free(async_arena);
+        free(async_arena);
+        cJSON_Delete(json);
+        send_text(res, 500, "Context allocation failed");
+        return;
+    }
+
+    // Store arena reference
+    ctx->arena = async_arena;
+
+    ctx->res = arena_copy_res(async_arena, res);
+    if (!ctx->res)
+    {
+        free_ctx(ctx->arena);;
+        cJSON_Delete(json);
+        send_text(res, 500, "Response copy failed");
+        return;
+    }
 
     // Copy all strings to context (they need to persist after this function returns)
-    ctx->name = strdup(name);
-    ctx->username = strdup(username);
-    ctx->password = strdup(password);
-    ctx->email = strdup(email);
-    ctx->about = strdup(about);
+    ctx->name = arena_strdup(async_arena, name);
+    ctx->username = arena_strdup(async_arena, username);
+    ctx->password = arena_strdup(async_arena, password);
+    ctx->email = arena_strdup(async_arena, email);
+    ctx->about = arena_strdup(async_arena, about);
 
     if (!ctx->name || !ctx->username || !ctx->password || !ctx->email || !ctx->about)
     {
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         cJSON_Delete(json);
         send_text(res, 500, "Memory allocation failed");
         return;
@@ -102,7 +99,7 @@ void add_user(Req *req, Res *res)
     ctx->hashpw = malloc(crypto_pwhash_STRBYTES);
     if (!ctx->hashpw)
     {
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         cJSON_Delete(json);
         send_text(res, 500, "Memory allocation failed");
         return;
@@ -114,7 +111,7 @@ void add_user(Req *req, Res *res)
             crypto_pwhash_OPSLIMIT_INTERACTIVE,
             crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0)
     {
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         cJSON_Delete(json);
         send_text(res, 500, "Password hashing failed");
         return;
@@ -126,7 +123,7 @@ void add_user(Req *req, Res *res)
     pg_async_t *pg = pquv_create(db, ctx);
     if (!pg)
     {
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         send_text(res, 500, "Failed to create async DB context");
         return;
     }
@@ -143,7 +140,7 @@ void add_user(Req *req, Res *res)
     // Queue the async check query
     if (pquv_queue(pg, check_sql, 2, check_params, check_user_exists, ctx) != 0)
     {
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         send_text(res, 500, "Failed to queue database query");
         return;
     }
@@ -151,7 +148,7 @@ void add_user(Req *req, Res *res)
     // Start execution - this will return immediately and execute asynchronously
     if (pquv_execute(pg) != 0)
     {
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         send_text(res, 500, "Failed to execute database query");
         return;
     }
@@ -177,7 +174,7 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("check_user_exists: DB check failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Database check failed");
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         return;
     }
 
@@ -189,7 +186,7 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("check_user_exists: Username or email already exists\n");
         send_text(ctx->res, 409, "Username or email already exists");
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         return;
     }
 
@@ -214,7 +211,7 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
     if (pquv_queue(pg, insert_sql, 5, insert_params, add_user_result, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue insert query");
-        cleanup(ctx);
+        free_ctx(ctx->arena);;
         return;
     }
 
@@ -245,5 +242,5 @@ static void add_user_result(pg_async_t *pg, PGresult *result, void *data)
         send_text(ctx->res, 500, "DB insert failed");
     }
 
-    cleanup(ctx);
+    free_ctx(ctx->arena);;
 }

@@ -3,20 +3,10 @@
 
 typedef struct
 {
+    Arena *arena;
     Res *res;
     bool is_author;
 } ctx_t;
-
-static void free_ctx(ctx_t *ctx)
-{
-    if (!ctx)
-        return;
-
-    if (ctx->res)
-        destroy_res(ctx->res);
-
-    free(ctx);
-}
 
 static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data);
 
@@ -24,16 +14,32 @@ void get_all_posts(Req *req, Res *res)
 {
     auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
 
-    // Create context to pass to callback
-    ctx_t *ctx = calloc(1, sizeof(ctx_t));
-    if (!ctx)
-    {
-        send_text(res, 500, "Memory allocation failed");
+    Arena *async_arena = calloc(1, sizeof(Arena));
+    if (!async_arena) {
+        send_text(res, 500, "Arena allocation failed");
         return;
     }
 
-    Res *copy = copy_res(res);
-    ctx->res = copy;
+    // Create context to pass to callback
+    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
+    if (!ctx) {
+        arena_free(async_arena);
+        free(async_arena);
+        send_text(res, 500, "Context allocation failed");
+        return;
+    }
+
+    // Store arena reference
+    ctx->arena = async_arena;
+
+    ctx->res = arena_copy_res(async_arena, res);
+    if (!ctx->res)
+    {
+        free_ctx(ctx->arena);
+        send_text(res, 500, "Response copy failed");
+        return;
+    }
+    
     ctx->is_author = auth_ctx->is_author;
 
     // Create async PostgreSQL context
@@ -42,7 +48,7 @@ void get_all_posts(Req *req, Res *res)
     {
         printf("get_all_posts: Failed to create async context\n");
         send_text(res, 500, "Failed to create async context");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -89,7 +95,7 @@ void get_all_posts(Req *req, Res *res)
         pquv_execute(pg) != 0)
     {
         send_text(res, 500, "Failed to queue or execute query");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -106,7 +112,7 @@ static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data)
     if (PQresultStatus(result) != PGRES_TUPLES_OK)
     {
         send_text(ctx->res, 500, "DB select failed");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -187,5 +193,5 @@ static void posts_result_callback(pg_async_t *pg, PGresult *result, void *data)
 
     cJSON_Delete(root);
     free(out);
-    free_ctx(ctx);
+    free_ctx(ctx->arena);
 }

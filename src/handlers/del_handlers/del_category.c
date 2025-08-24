@@ -3,17 +3,9 @@
 
 typedef struct
 {
+    Arena *arena;
     Res *res;
 } ctx_t;
-
-static void free_ctx(ctx_t *ctx)
-{
-    if (!ctx)
-        return;
-    if (ctx->res)
-        destroy_res(ctx->res);
-    free(ctx);
-}
 
 static void on_cat_deleted(pg_async_t *pg, PGresult *result, void *data);
 
@@ -29,20 +21,37 @@ void del_category(Req *req, Res *res)
         return;
     }
 
-    ctx_t *ctx = calloc(1, sizeof(ctx_t));
-    if (!ctx)
-    {
-        send_text(res, 500, "Memory allocation error");
+    // Create separate arena for async operation
+    Arena *async_arena = calloc(1, sizeof(Arena));
+    if (!async_arena) {
+        send_text(res, 500, "Arena allocation failed");
         return;
     }
 
-    Res *copy = copy_res(res);
-    ctx->res = copy;
+    // Allocate login context
+    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
+    if (!ctx) {
+        arena_free(async_arena);
+        free(async_arena);
+        send_text(res, 500, "Context allocation failed");
+        return;
+    }
+
+    // Store arena reference
+    ctx->arena = async_arena;
+
+    ctx->res = arena_copy_res(async_arena, res);
+    if (!ctx->res)
+    {
+        free_ctx(ctx->arena);
+        send_text(res, 500, "Response copy failed");
+        return;
+    }
 
     pg_async_t *pg = pquv_create(db, ctx);
     if (!pg)
     {
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Database connection error");
         return;
     }
@@ -58,7 +67,7 @@ void del_category(Req *req, Res *res)
     if (qr != 0)
     {
         printf("ERROR: Failed to queue delete, result=%d\n", qr);
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to queue delete");
         return;
     }
@@ -66,7 +75,7 @@ void del_category(Req *req, Res *res)
     if (pquv_execute(pg) != 0)
     {
         printf("ERROR: Failed to execute delete\n");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to execute delete");
         return;
     }
@@ -80,7 +89,7 @@ static void on_cat_deleted(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("Invalid context\n");
         if (ctx)
-            free_ctx(ctx);
+            free_ctx(ctx->arena);
         return;
     }
 
@@ -90,17 +99,17 @@ static void on_cat_deleted(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("Category could not be deleted: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Category could not be deleted");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
     if (PQcmdTuples(result) == 0)
     {
         send_text(ctx->res, 404, "Category not found");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
     send_text(ctx->res, 200, "Category deleted successfully");
-    free_ctx(ctx);
+    free_ctx(ctx->arena);
 }

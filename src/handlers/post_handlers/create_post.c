@@ -8,6 +8,7 @@
 
 typedef struct
 {
+    Arena *arena;
     Res *res;
     char *header;
     char *content;
@@ -22,29 +23,6 @@ typedef struct
     char *batch_sql;
     bool response_sent;
 } ctx_t;
-
-static void free_ctx(ctx_t *ctx)
-{
-    if (!ctx)
-        return;
-
-    if (ctx->res)
-        destroy_res(ctx->res);
-    if (ctx->header)
-        free(ctx->header);
-    if (ctx->content)
-        free(ctx->content);
-    if (ctx->slug)
-        free(ctx->slug);
-    if (ctx->author_id)
-        free(ctx->author_id);
-    if (ctx->category_ids)
-        free(ctx->category_ids);
-    if (ctx->batch_sql)
-        free(ctx->batch_sql);
-
-    free(ctx);
-}
 
 static void on_query_post(pg_async_t *pg, PGresult *result, void *data);
 static void on_post_created(pg_async_t *pg, PGresult *result, void *data);
@@ -87,22 +65,44 @@ void create_post(Req *req, Res *res)
 
     int reading_time = compute_reading_time(content);
 
-    ctx_t *ctx = calloc(1, sizeof(ctx_t));
-    if (!ctx)
-    {
-        cJSON_Delete(json);
+    // Create separate arena for async operation
+    Arena *async_arena = calloc(1, sizeof(Arena));
+    if (!async_arena) {
         free(slug);
-        send_text(res, 500, "Memory allocation error");
+        cJSON_Delete(json);
+        send_text(res, 500, "Arena allocation failed");
         return;
     }
 
-    Res *copy = copy_res(res);
-    ctx->res = copy;
-    ctx->header = strdup(header);
-    ctx->content = strdup(content);
-    ctx->slug = strdup(slug);
+    // Allocate async context in the async arena
+    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
+    if (!ctx) {
+        arena_free(async_arena);
+        free(async_arena);
+        free(slug);
+        cJSON_Delete(json);
+        send_text(res, 500, "Context allocation failed");
+        return;
+    }
+
+    // Store arena reference
+    ctx->arena = async_arena;
+
+    ctx->res = arena_copy_res(async_arena, res);
+    if (!ctx->res)
+    {
+        free_ctx(ctx->arena);
+        free(slug);
+        cJSON_Delete(json);
+        send_text(res, 500, "Response copy failed");
+        return;
+    }
+
+    ctx->header = arena_strdup(async_arena, header);
+    ctx->content = arena_strdup(async_arena, content);
+    ctx->slug = arena_strdup(async_arena, slug);
     ctx->reading_time = reading_time;
-    ctx->author_id = strdup(author_id);
+    ctx->author_id = arena_strdup(async_arena, author_id);
     ctx->created_at = (int)time(NULL);
     ctx->updated_at = ctx->created_at;
     ctx->is_hidden = is_hidden;
@@ -112,7 +112,7 @@ void create_post(Req *req, Res *res)
 
     if (!ctx->header || !ctx->content || !ctx->slug || !ctx->author_id)
     {
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         cJSON_Delete(json);
         send_text(res, 500, "Memory allocation failed");
         return;
@@ -132,7 +132,7 @@ void create_post(Req *req, Res *res)
             ctx->category_ids = malloc(n * sizeof(int));
             if (!ctx->category_ids)
             {
-                free_ctx(ctx);
+                free_ctx(ctx->arena);
                 cJSON_Delete(json);
                 send_text(res, 500, "Memory allocation failed for categories");
                 return;
@@ -162,7 +162,7 @@ void create_post(Req *req, Res *res)
     pg_async_t *pg = pquv_create(db, ctx);
     if (!pg)
     {
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Database connection error");
         return;
     }
@@ -174,7 +174,7 @@ void create_post(Req *req, Res *res)
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to queue query");
         return;
     }
@@ -183,7 +183,7 @@ void create_post(Req *req, Res *res)
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -197,14 +197,14 @@ static void on_query_post(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_query_post: Invalid context\n");
         if (ctx)
-            free_ctx(ctx);
+            free_ctx(ctx->arena);
         return;
     }
 
     if (!result)
     {
         printf("ERROR: Result is NULL\n");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -220,7 +220,7 @@ static void on_query_post(pg_async_t *pg, PGresult *result, void *data)
         printf("on_query_post: DB check failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Database check failed");
         ctx->response_sent = true;
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -229,7 +229,7 @@ static void on_query_post(pg_async_t *pg, PGresult *result, void *data)
         printf("on_query_post: Post with this slug already exists\n");
         send_text(ctx->res, 409, "This post already exists");
         ctx->response_sent = true;
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
     printf("on_query_post: No duplicate found, proceeding with insert\n");
@@ -266,7 +266,7 @@ static void on_query_post(pg_async_t *pg, PGresult *result, void *data)
             send_text(ctx->res, 500, "Failed to queue insert query");
             ctx->response_sent = true;
         }
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -280,7 +280,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
     if (!ctx || !ctx->res)
     {
         if (ctx)
-            free_ctx(ctx);
+            free_ctx(ctx->arena);
         return;
     }
 
@@ -294,7 +294,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
         printf("on_post_created: Post insert failed\n");
         send_text(ctx->res, 500, "DB insert failed");
         ctx->response_sent = true;
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -304,7 +304,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
     {
         send_text(ctx->res, 201, "Post created successfully");
         ctx->response_sent = true;
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -319,7 +319,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
             send_text(ctx->res, 500, "Memory allocation failed");
             ctx->response_sent = true;
         }
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -346,7 +346,7 @@ static void on_post_created(pg_async_t *pg, PGresult *result, void *data)
             send_text(ctx->res, 500, "Failed to queue batch category insert");
             ctx->response_sent = true;
         }
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -361,7 +361,7 @@ static void insert_post_result(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("insert_post_result: Invalid context\n");
         if (ctx)
-            free_ctx(ctx);
+            free_ctx(ctx->arena);
         return;
     }
 
@@ -377,12 +377,12 @@ static void insert_post_result(pg_async_t *pg, PGresult *result, void *data)
         printf("insert_post_result: Batch category insert failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Category insert failed");
         ctx->response_sent = true;
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
     printf("insert_post_result: Post created successfully with all categories\n");
     send_text(ctx->res, 201, "Post created successfully");
     ctx->response_sent = true;
-    free_ctx(ctx);
+    free_ctx(ctx->arena);
 }

@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <stdbool.h>
 #include "middlewares.h"
 #include "session.h"
 #include "cJSON.h"
@@ -27,13 +28,14 @@ int is_auth(Req *req, Res *res, Chain *chain)
     // Get the user session
     Session *session = get_session(req);
 
-    // Always allocate a session context, even if no session data
-    auth_context_t *ctx = calloc(1, sizeof(auth_context_t));
+    auth_context_t *ctx = arena_alloc(req->arena, sizeof(auth_context_t));
     if (!ctx)
     {
         send_text(res, 500, "Internal Server Error");
         return 0;
     }
+
+    memset(ctx, 0, sizeof(auth_context_t));
 
     if (session)
     {
@@ -44,8 +46,6 @@ int is_auth(Req *req, Res *res, Chain *chain)
 
         if (!id || !name || !username)
         {
-            free(ctx);
-
             free(id);
             free(name);
             free(username);
@@ -55,23 +55,42 @@ int is_auth(Req *req, Res *res, Chain *chain)
             return 0;
         }
 
-        ctx->id = id;
-        ctx->name = name;
-        ctx->username = username;
+        // Copy strings into arena
+        ctx->id = arena_strdup(req->arena, id);
+        ctx->name = arena_strdup(req->arena, name);
+        ctx->username = arena_strdup(req->arena, username);
         ctx->is_admin = string_to_bool(is_admin_str);
 
+        free(id);
+        free(name);
+        free(username);
         free(is_admin_str);
+
+        // Arena allocation check
+        if (!ctx->id || !ctx->name || !ctx->username) {
+            send_text(res, 500, "Memory allocation failed");
+            return 0;
+        }
+
+        ctx->user_slug = arena_strdup(req->arena, username);
+        if (!ctx->user_slug) {
+            send_text(res, 500, "Memory allocation failed");
+            return 0;
+        }
+
+        ctx->is_author = (strstr(ctx->username, "author") != NULL);
     }
     else
     {
         ctx->id = NULL;
         ctx->name = NULL;
         ctx->username = NULL;
+        ctx->user_slug = NULL;
         ctx->is_admin = false;
+        ctx->is_author = false;
     }
 
-    // Attach context to request; cleanup will free ctx and strings
-    set_context(req, ctx, sizeof(*ctx), cleanup_auth_ctx);
+    set_context(req, ctx, sizeof(*ctx), NULL);
 
     // Continue to next handler in chain
     return next(chain, req, res);

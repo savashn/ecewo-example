@@ -31,7 +31,6 @@ add_executable(server
     src/handlers/put_handlers/edit_category.c
     src/routers/routers.c
     src/middlewares/middlewares.c
-    src/contexts/context.c
     src/utils/utils.c
     vendors/cJSON.c
     vendors/dotenv.c

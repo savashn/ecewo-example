@@ -2,6 +2,8 @@
 
 This is an example blog app built with [Ecewo](https://github.com/savashn/ecewo) and PostgreSQL.
 
+The `main` branch shows examples that use Arena allocator. If you want to see examples that managemes the memory manually, see the `manual-memory` branch.
+
 Using dependencies:
 - [pquv](https://github.com/savashn/pquv) for integration of async PostgreSQL queries with Ecewo, based on [libuv](https://libuv.org/) and [libpq](https://www.postgresql.org/docs/current/libpq.html)
 - [ecewo-session](https://github.com/savashn/ecewo-session) for session-based authentication

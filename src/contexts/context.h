@@ -13,6 +13,4 @@ typedef struct
     char *user_slug;
 } auth_context_t;
 
-void cleanup_auth_ctx(void *data);
-
 #endif

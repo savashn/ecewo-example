@@ -3,18 +3,9 @@
 // Callback structure to hold request/response context
 typedef struct
 {
+    Arena *arena;
     Res *res;
 } ctx_t;
-
-static void free_ctx(ctx_t *ctx)
-{
-    if (!ctx)
-        return;
-
-    if (ctx->res)
-        destroy_res(ctx->res);
-    free(ctx);
-}
 
 static void users_result_callback(pg_async_t *pg, PGresult *result, void *data);
 
@@ -23,15 +14,31 @@ void get_all_users_async(Req *req, Res *res)
 {
     const char *sql = "SELECT id, name, username FROM users;";
 
-    // Create context to pass to callback
-    ctx_t *ctx = calloc(1, sizeof(ctx_t));
-    if (!ctx)
-    {
-        send_text(res, 500, "Memory allocation failed");
+    Arena *async_arena = calloc(1, sizeof(Arena));
+    if (!async_arena) {
+        send_text(res, 500, "Arena allocation failed");
         return;
     }
 
-    ctx->res = copy_res(res);
+    // Create context to pass to callback
+    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
+    if (!ctx) {
+        arena_free(async_arena);
+        free(async_arena);
+        send_text(res, 500, "Context allocation failed");
+        return;
+    }
+
+    // Store arena reference
+    ctx->arena = async_arena;
+
+    ctx->res = arena_copy_res(async_arena, res);
+    if (!ctx->res)
+    {
+        free_ctx(ctx->arena);
+        send_text(res, 500, "Response copy failed");
+        return;
+    }
 
     // Create async PostgreSQL context
     pg_async_t *pg = pquv_create(db, ctx);
@@ -39,7 +46,7 @@ void get_all_users_async(Req *req, Res *res)
     {
         printf("get_all_users_async: Failed to create pg_async context\n");
         send_text(res, 500, "Failed to create async context");
-        free(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -49,7 +56,7 @@ void get_all_users_async(Req *req, Res *res)
     {
         printf("get_all_users_async: Failed to queue query\n");
         send_text(res, 500, "Failed to queue query");
-        free(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -59,7 +66,7 @@ void get_all_users_async(Req *req, Res *res)
     {
         printf("get_all_users_async: Failed to execute query\n");
         send_text(res, 500, "Failed to execute query");
-        free(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -83,7 +90,7 @@ static void users_result_callback(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("users_result_callback: Query failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "DB select failed");
-        free(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -110,7 +117,7 @@ static void users_result_callback(pg_async_t *pg, PGresult *result, void *data)
     // Cleanup
     cJSON_Delete(json_array);
     free(json_string);
-    free_ctx(ctx);
+    free_ctx(ctx->arena);
 
     printf("users_result_callback: Response sent successfully\n");
 }

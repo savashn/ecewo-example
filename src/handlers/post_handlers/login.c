@@ -4,6 +4,7 @@
 
 typedef struct
 {
+    Arena *arena;
     Res *res;
     char *username;
     char *password;
@@ -11,27 +12,6 @@ typedef struct
     char *name;
     char *hashed_password;
 } ctx_t;
-
-static void free_ctx(ctx_t *ctx)
-{
-    if (!ctx)
-        return;
-
-    if (ctx->res)
-        destroy_res(ctx->res);
-    if (ctx->username)
-        free(ctx->username);
-    if (ctx->password)
-        free(ctx->password);
-    if (ctx->user_id)
-        free(ctx->user_id);
-    if (ctx->name)
-        free(ctx->name);
-    if (ctx->hashed_password)
-        free(ctx->hashed_password);
-
-    free(ctx);
-}
 
 static void on_user_found(pg_async_t *pg, PGresult *result, void *data);
 
@@ -64,21 +44,39 @@ void login(Req *req, Res *res)
         return;
     }
 
-    // Create login context
-    ctx_t *ctx = calloc(1, sizeof(ctx_t));
-    if (!ctx)
-    {
-        printf("ERROR: Memory allocation failed\n");
-        send_text(res, 500, "Memory allocation error");
+    // Create separate arena for async operation
+    Arena *async_arena = calloc(1, sizeof(Arena));
+    if (!async_arena) {
+        cJSON_Delete(json);
+        send_text(res, 500, "Arena allocation failed");
         return;
     }
 
-    ctx->username = strdup(juser->valuestring);
-    ctx->password = strdup(jpass->valuestring);
-    cJSON_Delete(json);
+    // Allocate login context
+    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
+    if (!ctx) {
+        arena_free(async_arena);
+        free(async_arena);
+        cJSON_Delete(json);
+        send_text(res, 500, "Context allocation failed");
+        return;
+    }
 
-    Res *copy = copy_res(res);
-    ctx->res = copy;
+    // Store arena reference
+    ctx->arena = async_arena;
+
+    ctx->res = arena_copy_res(async_arena, res);
+    if (!ctx->res)
+    {
+        free_ctx(ctx->arena);
+        cJSON_Delete(json);
+        send_text(res, 500, "Response copy failed");
+        return;
+    }
+
+    ctx->username = arena_strdup(async_arena, juser->valuestring);
+    ctx->password = arena_strdup(async_arena, jpass->valuestring);
+    cJSON_Delete(json);
 
     // Create PostgreSQL async context
     pg_async_t *pg = pquv_create(db, ctx);
@@ -86,7 +84,7 @@ void login(Req *req, Res *res)
     if (!pg)
     {
         printf("ERROR: Failed to create pg_async context\n");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Database connection error");
         return;
     }
@@ -99,7 +97,7 @@ void login(Req *req, Res *res)
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to queue query");
         return;
     }
@@ -109,7 +107,7 @@ void login(Req *req, Res *res)
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -122,7 +120,7 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
     if (!result)
     {
         printf("ERROR: Result is NULL\n");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 
@@ -130,7 +128,7 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
 
     if (PQntuples(result) == 0)
     {
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         send_text(ctx->res, 404, "User not found");
         return;
     }
@@ -151,7 +149,7 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
     if (verify_result != 0)
     {
         send_text(ctx->res, 401, "Incorrect password");
-        free_ctx(ctx);
+        free_ctx(ctx->arena);
         return;
     }
 

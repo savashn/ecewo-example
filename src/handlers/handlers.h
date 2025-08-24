@@ -6,6 +6,7 @@
 #include "pquv.h"
 #include "db.h" // extern PGconn *db;
 #include "connection.h"
+#include "utils.h"
 
 void hello_world(Req *req, Res *res);
 void get_all_users(Req *req, Res *res);
