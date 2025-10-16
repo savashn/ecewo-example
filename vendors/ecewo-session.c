@@ -3,10 +3,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <ctype.h>
-
-#include "session.h"
-#include "request.h"
-#include "compat.h"
+#include "ecewo-session.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -28,13 +25,17 @@ static int initialized = 0;
 #define PAIR_DELIMITER '\x1E'      // ASCII Record Separator - separates key-value pairs
 #define MAX_SESSION_DATA_SIZE 4096 // Prevent unlimited growth
 
-static const cookie_options_t COOKIE_DEFAULTS = {
+// Default cookie options for sessions
+static const Cookie SESSION_COOKIE_DEFAULTS = {
+    .max_age = 3600, // 1 hour default
     .path = "/",
+    .domain = NULL,
     .same_site = "Lax",
-    .http_only = true,
-    .secure = true,
+    .http_only = true, // Prevent JavaScript access
+    .secure = false,   // Set to true in production with HTTPS
 };
 
+// URL encoding helpers
 static int is_url_safe(char c)
 {
     return (isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~');
@@ -133,7 +134,7 @@ static char *safe_strdup(const char *str)
     return copy;
 }
 
-int init_sessions(void)
+int session_init(void)
 {
     if (initialized)
         return 1;
@@ -148,7 +149,7 @@ int init_sessions(void)
     return 1;
 }
 
-void reset_sessions(void)
+void session_cleanup(void)
 {
     if (!initialized)
         return;
@@ -273,13 +274,13 @@ static void cleanup_expired_sessions(void)
     for (int i = 0; i < max_sessions; i++)
     {
         if (sessions[i].id[0] != '\0' && sessions[i].expires < now)
-            free_session(&sessions[i]);
+            session_free(&sessions[i]);
     }
 }
 
-Session *create_session(int max_age)
+Session *session_create(int max_age)
 {
-    if (!initialized && !init_sessions())
+    if (!initialized && !session_init())
         return NULL;
 
     cleanup_expired_sessions();
@@ -316,7 +317,7 @@ Session *create_session(int max_age)
     return &sessions[slot];
 }
 
-Session *find_session(const char *id)
+Session *session_find(const char *id)
 {
     if (!id || !initialized)
         return NULL;
@@ -353,7 +354,6 @@ static void remove_key_from_data(char *data, const char *encoded_key)
         if (key_len == strlen(encoded_key) &&
             strncmp(search_start, encoded_key, key_len) == 0)
         {
-
             // Found the key, find the end of this pair
             char *value_start = key_end + 1;
             char *pair_end = strchr(value_start, PAIR_DELIMITER);
@@ -379,7 +379,7 @@ static void remove_key_from_data(char *data, const char *encoded_key)
     }
 }
 
-void set_session(Session *sess, const char *key, const char *value)
+void session_value_set(Session *sess, const char *key, const char *value)
 {
     if (!sess || !key || !value)
         return;
@@ -451,7 +451,7 @@ void set_session(Session *sess, const char *key, const char *value)
     free(encoded_value);
 }
 
-char *get_session_value(Session *sess, const char *key)
+char *session_value_get(Session *sess, const char *key)
 {
     if (!sess || !key || !sess->data || strlen(sess->data) == 0)
         return NULL;
@@ -476,7 +476,6 @@ char *get_session_value(Session *sess, const char *key)
         if (key_len == strlen(encoded_key) &&
             strncmp(search_start, encoded_key, key_len) == 0)
         {
-
             // Found the key, extract value
             char *value_start = key_end + 1;
             char *value_end = strchr(value_start, PAIR_DELIMITER);
@@ -504,7 +503,7 @@ char *get_session_value(Session *sess, const char *key)
     return result;
 }
 
-void remove_session_value(Session *sess, const char *key)
+void session_value_remove(Session *sess, const char *key)
 {
     if (!sess || !key || !sess->data)
         return;
@@ -517,7 +516,7 @@ void remove_session_value(Session *sess, const char *key)
     free(encoded_key);
 }
 
-void free_session(Session *sess)
+void session_free(Session *sess)
 {
     if (!sess)
         return;
@@ -531,18 +530,18 @@ void free_session(Session *sess)
     }
 }
 
-Session *get_session(Req *req)
+Session *session_get(Req *req)
 {
-    char *sid = get_cookie(req, "session");
+    char *sid = cookie_get(req, "session");
     if (!sid)
         return NULL;
 
-    Session *sess = find_session(sid);
-    free(sid);
+    Session *sess = session_find(sid);
+    // Note: cookie_get returns arena-allocated memory, so no need to free sid
     return sess;
 }
 
-void print_sessions(void)
+void session_print_all(void)
 {
     time_t now = time(NULL);
     printf("=== Sessions ===\n");
@@ -607,30 +606,33 @@ void print_sessions(void)
     printf("================\n");
 }
 
-void send_session(Res *res, Session *sess, cookie_options_t *options)
+void session_send(Res *res, Session *sess, Cookie *options)
 {
     if (!res || !sess || sess->id[0] == '\0')
+    {
+        fprintf(stderr, "Error on session sending\n");
         return;
+    }
 
     time_t now = time(NULL);
     int max_age = (int)difftime(sess->expires, now);
     if (max_age < 0)
         return;
 
-    cookie_options_t opt = options ? *options : COOKIE_DEFAULTS;
-    opt.max_age = max_age;
+    Cookie opts = options ? *options : SESSION_COOKIE_DEFAULTS;
+    opts.max_age = max_age;
 
-    set_cookie(res, "session", sess->id, &opt);
+    cookie_set(res, "session", sess->id, &opts);
 }
 
-void destroy_session(Res *res, Session *sess, cookie_options_t *options)
+void session_destroy(Res *res, Session *sess, Cookie *options)
 {
     if (!res || !sess || sess->id[0] == '\0')
         return;
 
-    cookie_options_t opt = options ? *options : COOKIE_DEFAULTS;
-    opt.max_age = 0;
+    Cookie opts = options ? *options : SESSION_COOKIE_DEFAULTS;
+    opts.max_age = 0; // Expire immediately
 
-    set_cookie(res, "session", "", &opt);
-    free_session(sess);
+    cookie_set(res, "session", "", &opts);
+    session_free(sess);
 }

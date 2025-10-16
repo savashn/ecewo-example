@@ -1,10 +1,10 @@
 #include <sodium.h>
 #include "handlers.h"
-#include "session.h"
+#include "ecewo-session.h"
+#include <stdio.h>
 
 typedef struct
 {
-    Arena *arena;
     Res *res;
     char *username;
     char *password;
@@ -13,11 +13,11 @@ typedef struct
     char *hashed_password;
 } ctx_t;
 
-static void on_user_found(pg_async_t *pg, PGresult *result, void *data);
+static void on_user_found(PGquery *pg, PGresult *result, void *data);
 
 void login(Req *req, Res *res)
 {
-    Session *user_session = get_session(req);
+    Session *user_session = session_get(req);
 
     if (user_session)
     {
@@ -44,47 +44,33 @@ void login(Req *req, Res *res)
         return;
     }
 
-    // Create separate arena for async operation
-    Arena *async_arena = calloc(1, sizeof(Arena));
-    if (!async_arena) {
-        cJSON_Delete(json);
-        send_text(res, 500, "Arena allocation failed");
-        return;
-    }
-
     // Allocate login context
-    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
-    if (!ctx) {
-        arena_free(async_arena);
-        free(async_arena);
+    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    if (!ctx)
+    {
         cJSON_Delete(json);
         send_text(res, 500, "Context allocation failed");
         return;
     }
 
-    // Store arena reference
-    ctx->arena = async_arena;
-
-    ctx->res = arena_copy_res(async_arena, res);
+    ctx->res = res;
     if (!ctx->res)
     {
-        free_ctx(ctx->arena);
         cJSON_Delete(json);
         send_text(res, 500, "Response copy failed");
         return;
     }
 
-    ctx->username = arena_strdup(async_arena, juser->valuestring);
-    ctx->password = arena_strdup(async_arena, jpass->valuestring);
+    ctx->username = ecewo_strdup(res, juser->valuestring);
+    ctx->password = ecewo_strdup(res, jpass->valuestring);
     cJSON_Delete(json);
 
     // Create PostgreSQL async context
-    pg_async_t *pg = pquv_create(db, ctx);
+    PGquery *pg = query_create(db, ctx);
 
     if (!pg)
     {
         printf("ERROR: Failed to create pg_async context\n");
-        free_ctx(ctx->arena);
         send_text(res, 500, "Database connection error");
         return;
     }
@@ -93,34 +79,31 @@ void login(Req *req, Res *res)
     const char *select_sql = "SELECT id, name, password FROM users WHERE username = $1";
     const char *params[] = {ctx->username};
 
-    int query_result = pquv_queue(pg, select_sql, 1, params, on_user_found, ctx);
+    int query_result = query_queue(pg, select_sql, 1, params, on_user_found, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
     // Start execution
-    int exec_result = pquv_execute(pg);
+    int exec_result = query_execute(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to execute query");
         return;
     }
 }
 
-static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
+static void on_user_found(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
     if (!result)
     {
         printf("ERROR: Result is NULL\n");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -128,15 +111,14 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
 
     if (PQntuples(result) == 0)
     {
-        free_ctx(ctx->arena);
         send_text(ctx->res, 404, "User not found");
         return;
     }
 
     // Extract user data
-    ctx->user_id = strdup(PQgetvalue(result, 0, 0));
-    ctx->name = strdup(PQgetvalue(result, 0, 1));
-    ctx->hashed_password = strdup(PQgetvalue(result, 0, 2));
+    ctx->user_id = ecewo_strdup(ctx->res, PQgetvalue(result, 0, 0));
+    ctx->name = ecewo_strdup(ctx->res, PQgetvalue(result, 0, 1));
+    ctx->hashed_password = ecewo_strdup(ctx->res, PQgetvalue(result, 0, 2));
 
     // Verify password
     if (sodium_init() < 0)
@@ -149,23 +131,20 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
     if (verify_result != 0)
     {
         send_text(ctx->res, 401, "Incorrect password");
-        free_ctx(ctx->arena);
         return;
     }
 
-    Session *sess = create_session(3600);
+    Session *sess = session_create(3600);
 
-    set_session(sess, "id", ctx->user_id);
-    set_session(sess, "name", ctx->name);
-    set_session(sess, "username", ctx->username);
+    session_value_set(sess, "id", ctx->user_id);
+    session_value_set(sess, "name", ctx->name);
+    session_value_set(sess, "username", ctx->username);
 
     if (strstr(ctx->username, "johndoe"))
-    {
-        set_session(sess, "is_admin", "true");
-    }
+        session_value_set(sess, "is_admin", "true");
 
     // The cookie_options must be the same in the logout handler
-    cookie_options_t cookie_options = {
+    Cookie cookie_options = {
         .max_age = 3600, // 1 hour
         .path = "/",
         .same_site = "Lax",
@@ -173,6 +152,6 @@ static void on_user_found(pg_async_t *pg, PGresult *result, void *data)
         .secure = true,
     };
 
-    send_session(ctx->res, sess, &cookie_options);
+    session_send(ctx->res, sess, &cookie_options);
     send_text(ctx->res, 200, "Login successful");
 }

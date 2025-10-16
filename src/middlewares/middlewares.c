@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include "middlewares.h"
-#include "session.h"
+#include "ecewo-session.h"
 #include "cJSON.h"
 #include "context.h"
 
@@ -13,7 +13,7 @@ int body_checker(Req *req, Res *res, Chain *chain)
         return 0;
     }
 
-    return next(chain, req, res);
+    return next(req, res, chain);
 }
 
 static bool string_to_bool(const char *str)
@@ -26,7 +26,7 @@ static bool string_to_bool(const char *str)
 int is_auth(Req *req, Res *res, Chain *chain)
 {
     // Get the user session
-    Session *session = get_session(req);
+    Session *session = session_get(req);
 
     auth_context_t *ctx = arena_alloc(req->arena, sizeof(auth_context_t));
     if (!ctx)
@@ -35,14 +35,12 @@ int is_auth(Req *req, Res *res, Chain *chain)
         return 0;
     }
 
-    memset(ctx, 0, sizeof(auth_context_t));
-
     if (session)
     {
-        char *id = get_session_value(session, "id");
-        char *name = get_session_value(session, "name");
-        char *username = get_session_value(session, "username");
-        char *is_admin_str = get_session_value(session, "is_admin");
+        char *id = session_value_get(session, "id");
+        char *name = session_value_get(session, "name");
+        char *username = session_value_get(session, "username");
+        char *is_admin_str = session_value_get(session, "is_admin");
 
         if (!id || !name || !username)
         {
@@ -56,9 +54,9 @@ int is_auth(Req *req, Res *res, Chain *chain)
         }
 
         // Copy strings into arena
-        ctx->id = arena_strdup(req->arena, id);
-        ctx->name = arena_strdup(req->arena, name);
-        ctx->username = arena_strdup(req->arena, username);
+        ctx->id = ecewo_strdup(req, id);
+        ctx->name = ecewo_strdup(req, name);
+        ctx->username = ecewo_strdup(req, username);
         ctx->is_admin = string_to_bool(is_admin_str);
 
         free(id);
@@ -67,13 +65,15 @@ int is_auth(Req *req, Res *res, Chain *chain)
         free(is_admin_str);
 
         // Arena allocation check
-        if (!ctx->id || !ctx->name || !ctx->username) {
+        if (!ctx->id || !ctx->name || !ctx->username)
+        {
             send_text(res, 500, "Memory allocation failed");
             return 0;
         }
 
-        ctx->user_slug = arena_strdup(req->arena, username);
-        if (!ctx->user_slug) {
+        ctx->user_slug = ecewo_strdup(req, username);
+        if (!ctx->user_slug)
+        {
             send_text(res, 500, "Memory allocation failed");
             return 0;
         }
@@ -90,17 +90,17 @@ int is_auth(Req *req, Res *res, Chain *chain)
         ctx->is_author = false;
     }
 
-    set_context(req, ctx, sizeof(*ctx), NULL);
+    set_context(req, "auth_ctx", ctx, sizeof(auth_context_t));
 
     // Continue to next handler in chain
-    return next(chain, req, res);
+    return next(req, res, chain);
 }
 
 int is_authors_self(Req *req, Res *res, Chain *chain)
 {
-    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
-    const char *user_slug = get_params(req, "user");
+    const char *user_slug = get_param(req, "user");
     auth_ctx->user_slug = strdup(user_slug ? user_slug : "");
 
     if (!auth_ctx->user_slug)
@@ -115,12 +115,12 @@ int is_authors_self(Req *req, Res *res, Chain *chain)
             auth_ctx->is_author = true;
     }
 
-    return next(chain, req, res);
+    return next(req, res, chain);
 }
 
 int auth_only(Req *req, Res *res, Chain *chain)
 {
-    auth_context_t *ctx = (auth_context_t *)get_context(req);
+    auth_context_t *ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
     if (!ctx || !ctx->id || !ctx->name || !ctx->username)
     {
@@ -128,5 +128,5 @@ int auth_only(Req *req, Res *res, Chain *chain)
         return 0;
     }
 
-    return next(chain, req, res);
+    return next(req, res, chain);
 }

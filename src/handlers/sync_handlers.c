@@ -1,8 +1,9 @@
 #include "handlers.h"
 #include "db.h" // extern PGconn *db;
-#include "session.h"
+#include "ecewo-session.h"
 #include "context.h"
 #include "slugify.h"
+#include <stdio.h>
 
 void hello_world(Req *req, Res *res)
 {
@@ -55,16 +56,14 @@ void get_all_users(Req *req, Res *res)
 
 void logout(Req *req, Res *res)
 {
-    Session *sess = get_session(req);
+    Session *sess = session_get(req);
 
     if (!sess)
-    {
         send_text(res, 400, "You have to login");
-    }
     else
     {
         // The cookie_options should be the same as what we use in the login handler
-        cookie_options_t cookie_options = {
+        Cookie cookie_options = {
             .max_age = 3600, // 1 hour
             .path = "/",
             .same_site = "Lax",
@@ -72,7 +71,7 @@ void logout(Req *req, Res *res)
             .secure = true,
         };
 
-        destroy_session(res, sess, &cookie_options);
+        session_destroy(res, sess, &cookie_options);
         send_text(res, 302, "Logged out");
     }
 }

@@ -3,23 +3,23 @@
 #include "connection.h"
 #include "context.h"
 #include "utils.h"
-#include <time.h>
 #include "slugify.h"
+#include <time.h>
+#include <stdio.h>
 
 typedef struct
 {
-    Arena *arena;
     Res *res;
     char *category;
     char *slug;
     char *author_id;
 } ctx_t;
 
-static void on_category_insert(pg_async_t *pg, PGresult *result, void *data);
+static void on_category_insert(PGquery *pg, PGresult *result, void *data);
 
 void create_category(Req *req, Res *res)
 {
-    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
     cJSON *json = cJSON_Parse(req->body);
     if (!json)
@@ -42,57 +42,41 @@ void create_category(Req *req, Res *res)
 
     char *slug = slugify(category, NULL);
 
-    // Create separate arena for async operation
-    Arena *async_arena = calloc(1, sizeof(Arena));
-    if (!async_arena) {
-        free(slug);
-        cJSON_Delete(json);
-        send_text(res, 500, "Arena allocation failed");
-        return;
-    }
-
     // Allocate async context in the async arena
-    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
-    if (!ctx) {
-        arena_free(async_arena);
-        free(async_arena);
+    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    if (!ctx)
+    {
         free(slug);
         cJSON_Delete(json);
         send_text(res, 500, "Context allocation failed");
         return;
     }
 
-    // Store arena reference
-    ctx->arena = async_arena;
-
-    ctx->res = arena_copy_res(async_arena, res);
+    ctx->res = res;
     if (!ctx->res)
     {
-        free_ctx(ctx->arena);
         free(slug);
         cJSON_Delete(json);
         send_text(res, 500, "Response copy failed");
         return;
     }
 
-    ctx->category = arena_strdup(async_arena, category);
-    ctx->slug = arena_strdup(async_arena, slug);
-    ctx->author_id = arena_strdup(async_arena, author_id);
+    ctx->category = ecewo_strdup(ctx->res, category);
+    ctx->slug = ecewo_strdup(ctx->res, slug);
+    ctx->author_id = ecewo_strdup(ctx->res, author_id);
 
     free(slug);
     cJSON_Delete(json);
 
     if (!ctx->category || !ctx->slug || !ctx->author_id)
     {
-        free_ctx(ctx->arena);
         send_text(res, 500, "Memory allocation failed");
         return;
     }
 
-    pg_async_t *pg = pquv_create(db, ctx);
+    PGquery *pg = query_create(db, ctx);
     if (!pg)
     {
-        free_ctx(ctx->arena);
         send_text(res, 500, "Database connection error");
         return;
     }
@@ -106,20 +90,18 @@ void create_category(Req *req, Res *res)
 
     const char *params[] = {ctx->category, ctx->slug, ctx->author_id};
 
-    int query_result = pquv_queue(pg, conditional_insert_sql, 3, params, on_category_insert, ctx);
+    int query_result = query_queue(pg, conditional_insert_sql, 3, params, on_category_insert, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pquv_execute(pg);
+    int exec_result = query_execute(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -127,23 +109,14 @@ void create_category(Req *req, Res *res)
     printf("create_category: Conditional INSERT query started\n");
 }
 
-static void on_category_insert(pg_async_t *pg, PGresult *result, void *data)
+static void on_category_insert(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!ctx || !ctx->res)
-    {
-        printf("on_category_insert: Invalid context\n");
-        if (ctx)
-            free_ctx(ctx->arena);
-        return;
-    }
 
     if (!result)
     {
         printf("ERROR: Result is NULL\n");
         send_text(ctx->res, 500, "Database error");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -153,7 +126,6 @@ static void on_category_insert(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_category_insert: DB operation failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Database operation failed");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -179,6 +151,4 @@ static void on_category_insert(pg_async_t *pg, PGresult *result, void *data)
         printf("on_category_insert: Unexpected result: %d rows affected\n", rows_inserted);
         send_text(ctx->res, 500, "Unexpected database result");
     }
-
-    free_ctx(ctx->arena);
 }

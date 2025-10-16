@@ -1,12 +1,17 @@
-# ecewo-example
+# Ecewo Example Blog App
 
 This is an example blog app built with [Ecewo](https://github.com/savashn/ecewo) and PostgreSQL.
 
-The `main` branch shows examples that use Arena allocator. If you want to see examples that managemes the memory manually, see the `manual-memory` branch.
+> [!WARNING]
+>
+> This is not a real-world app. It is built to show what Ecewo looks like.
 
 Using dependencies:
-- [pquv](https://github.com/savashn/pquv) for integration of async PostgreSQL queries with Ecewo, based on [libuv](https://libuv.org/) and [libpq](https://www.postgresql.org/docs/current/libpq.html)
-- [ecewo-session](https://github.com/savashn/ecewo-session) for session-based authentication
+- [ecewo-postgres](https://github.com/savashn/ecewo-modules/tree/main/postgres) for integration of async PostgreSQL queries with Ecewo, based on [libuv](https://libuv.org/) and [libpq](https://www.postgresql.org/docs/current/libpq.html)
+- [ecewo-cookie](https://github.com/savashn/ecewo-modules/tree/main/cookie) for cookie management
+- [ecewo-session](https://github.com/savashn/ecewo-modules/tree/main/session) for session-based authentication
+- [ecewo-cors](https://github.com/savashn/ecewo-modules/tree/main/postgres) for CORS implementation
+- [ecewo-helmet](https://github.com/savashn/ecewo-modules/tree/main/postgres) for security headers
 - [cJSON](https://github.com/DaveGamble/cJSON) for handling JSON objects
 - [slugify-c](https://github.com/savashn/slugify-c) for creating URL-friendly ASCII characters
 - [dotenv-c](https://github.com/Isty001/dotenv-c) for managing environment variables
@@ -33,7 +38,6 @@ Before compiling the program, create a `.env` file in the project's root directo
 
 ```
 PORT
-CORS_ORIGIN
 DB_HOST
 DB_PORT
 DB_NAME
@@ -43,25 +47,9 @@ DB_PASSWORD
 
 ### 3. Build and run the project
 
-### 3.1 Build via [Ecewo-CLI](https://github.com/savashn/ecewo-cli)
+### 3.1 Build via Bash Script
 
-If [Ecewo-CLI](https://github.com/savashn/ecewo-cli) is already installed on your machine, you can build with the commands below:
-
-```
-ecewo build dev
-ecewo run
-```
-
-If you make some changes on the project and would lite to build from scratch:
-
-```
-ecewo rebuild dev
-ecewo run
-```
-
-### 3.2 Build via Bash Script
-
-If [Ecewo-CLI](https://github.com/savashn/ecewo-cli) is not installed, you can build with the following command:
+You can build with the following command:
 
 ```shell
 ./build.sh
@@ -73,7 +61,7 @@ If you make some changes on the project and would lite to build from scratch:
 ./build.sh rebuild
 ```
 
-### 3.3 Build Manually
+### 3.2 Build Manually
 
 If you prefer to build manually, run the suitable command:
 

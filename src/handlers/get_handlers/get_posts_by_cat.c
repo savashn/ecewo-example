@@ -1,14 +1,14 @@
 #include "handlers.h"
 #include "context.h"
+#include <stdio.h>
 
 typedef struct
 {
-    Arena *arena;
     Res *res;
     bool is_author;
 } ctx_t;
 
-void on_result(pg_async_t *pg, PGresult *result, void *data);
+void on_result(PGquery *pg, PGresult *result, void *data);
 
 void get_posts_by_cat(Req *req, Res *res)
 {
@@ -20,39 +20,27 @@ void get_posts_by_cat(Req *req, Res *res)
         return;
     }
 
-    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
-    Arena *async_arena = calloc(1, sizeof(Arena));
-    if (!async_arena) {
-        send_text(res, 500, "Arena allocation failed");
-        return;
-    }
-
-    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
-    if (!ctx) {
-        arena_free(async_arena);
-        free(async_arena);
+    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    if (!ctx)
+    {
         send_text(res, 500, "Context allocation failed");
         return;
     }
 
-    // Store arena reference
-    ctx->arena = async_arena;
-
-    ctx->res = arena_copy_res(async_arena, res);
+    ctx->res = res;
     if (!ctx->res)
     {
-        free_ctx(ctx->arena);
         send_text(res, 500, "Response copy failed");
         return;
     }
 
     ctx->is_author = auth_ctx->is_author;
 
-    pg_async_t *pg = pquv_create(db, ctx);
+    PGquery *pg = query_create(db, ctx);
     if (!pg)
     {
-        free_ctx(ctx->arena);
         send_text(res, 500, "Database connection error");
         return;
     }
@@ -73,48 +61,36 @@ void get_posts_by_cat(Req *req, Res *res)
 
     const char *params[] = {auth_ctx->user_slug, category};
 
-    int qr = pquv_queue(pg, select_sql, 2, params, on_result, ctx);
+    int qr = query_queue(pg, select_sql, 2, params, on_result, ctx);
     if (qr != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", qr);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pquv_execute(pg);
+    int exec_result = query_execute(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to execute query");
         return;
     }
 }
 
-void on_result(pg_async_t *pg, PGresult *result, void *data)
+void on_result(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!ctx || !ctx->res)
-    {
-        printf("ERROR: on_query_posts: Invalid context\n");
-        if (ctx)
-            free_ctx(ctx->arena);
-        return;
-    }
-
     if (!result)
     {
-        printf("ERROR: Result is NULL\n");
-        free_ctx(ctx->arena);
+        send_text(ctx->res, 500, "Result is NULL");
         return;
     }
 
     if (PQresultStatus(result) != PGRES_TUPLES_OK)
     {
         send_text(ctx->res, 500, "DB select failed");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -131,7 +107,6 @@ void on_result(pg_async_t *pg, PGresult *result, void *data)
         send_json(ctx->res, 200, out);
         cJSON_Delete(root);
         free(out);
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -140,9 +115,7 @@ void on_result(pg_async_t *pg, PGresult *result, void *data)
         bool hidden = (PQgetvalue(result, i, PQfnumber(result, "is_hidden"))[0] == 't');
 
         if (!ctx->is_author && hidden)
-        {
             continue;
-        }
 
         cJSON *obj = cJSON_CreateObject();
 
@@ -172,5 +145,4 @@ void on_result(pg_async_t *pg, PGresult *result, void *data)
 
     cJSON_Delete(root);
     free(out);
-    free_ctx(ctx->arena);
 }

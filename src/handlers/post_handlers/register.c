@@ -1,11 +1,11 @@
+#include <stdio.h>
 #include <sodium.h>
 #include "handlers.h"
-#include "session.h"
+#include "ecewo-session.h"
 
 // Structure to hold request context for async operations
 typedef struct
 {
-    Arena *arena;
     Res *res;
     char *name;
     char *username;
@@ -16,8 +16,8 @@ typedef struct
 } ctx_t;
 
 // Callback functions
-static void check_user_exists(pg_async_t *pg, PGresult *result, void *data);
-static void add_user_result(pg_async_t *pg, PGresult *result, void *data);
+static void check_user_exists(PGquery *pg, PGresult *result, void *data);
+static void add_user_result(PGquery *pg, PGresult *result, void *data);
 
 void add_user(Req *req, Res *res)
 {
@@ -50,56 +50,41 @@ void add_user(Req *req, Res *res)
     const char *email = j_email->valuestring;
     const char *about = cJSON_IsString(j_about) ? j_about->valuestring : "";
 
-    // Create separate arena for async operation
-    Arena *async_arena = calloc(1, sizeof(Arena));
-    if (!async_arena) {
-        cJSON_Delete(json);
-        send_text(res, 500, "Arena allocation failed");
-        return;
-    }
-
     // Create context to hold all the data for async operation
-    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
-    if (!ctx) {
-        arena_free(async_arena);
-        free(async_arena);
+    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    if (!ctx)
+    {
         cJSON_Delete(json);
         send_text(res, 500, "Context allocation failed");
         return;
     }
 
-    // Store arena reference
-    ctx->arena = async_arena;
-
-    ctx->res = arena_copy_res(async_arena, res);
+    ctx->res = res;
     if (!ctx->res)
     {
-        free_ctx(ctx->arena);;
         cJSON_Delete(json);
         send_text(res, 500, "Response copy failed");
         return;
     }
 
     // Copy all strings to context (they need to persist after this function returns)
-    ctx->name = arena_strdup(async_arena, name);
-    ctx->username = arena_strdup(async_arena, username);
-    ctx->password = arena_strdup(async_arena, password);
-    ctx->email = arena_strdup(async_arena, email);
-    ctx->about = arena_strdup(async_arena, about);
+    ctx->name = ecewo_strdup(res, name);
+    ctx->username = ecewo_strdup(res, username);
+    ctx->password = ecewo_strdup(res, password);
+    ctx->email = ecewo_strdup(res, email);
+    ctx->about = ecewo_strdup(res, about);
 
     if (!ctx->name || !ctx->username || !ctx->password || !ctx->email || !ctx->about)
     {
-        free_ctx(ctx->arena);;
         cJSON_Delete(json);
         send_text(res, 500, "Memory allocation failed");
         return;
     }
 
     // Hash the password
-    ctx->hashpw = malloc(crypto_pwhash_STRBYTES);
+    ctx->hashpw = ecewo_alloc(res, crypto_pwhash_STRBYTES);
     if (!ctx->hashpw)
     {
-        free_ctx(ctx->arena);;
         cJSON_Delete(json);
         send_text(res, 500, "Memory allocation failed");
         return;
@@ -111,7 +96,6 @@ void add_user(Req *req, Res *res)
             crypto_pwhash_OPSLIMIT_INTERACTIVE,
             crypto_pwhash_MEMLIMIT_INTERACTIVE) != 0)
     {
-        free_ctx(ctx->arena);;
         cJSON_Delete(json);
         send_text(res, 500, "Password hashing failed");
         return;
@@ -120,10 +104,9 @@ void add_user(Req *req, Res *res)
     cJSON_Delete(json);
 
     // Create async PostgreSQL context
-    pg_async_t *pg = pquv_create(db, ctx);
+    PGquery *pg = query_create(db, ctx);
     if (!pg)
     {
-        free_ctx(ctx->arena);;
         send_text(res, 500, "Failed to create async DB context");
         return;
     }
@@ -138,17 +121,15 @@ void add_user(Req *req, Res *res)
         ctx->email};
 
     // Queue the async check query
-    if (pquv_queue(pg, check_sql, 2, check_params, check_user_exists, ctx) != 0)
+    if (query_queue(pg, check_sql, 2, check_params, check_user_exists, ctx) != 0)
     {
-        free_ctx(ctx->arena);;
         send_text(res, 500, "Failed to queue database query");
         return;
     }
 
     // Start execution - this will return immediately and execute asynchronously
-    if (pquv_execute(pg) != 0)
+    if (query_execute(pg) != 0)
     {
-        free_ctx(ctx->arena);;
         send_text(res, 500, "Failed to execute database query");
         return;
     }
@@ -158,15 +139,9 @@ void add_user(Req *req, Res *res)
 }
 
 // Callback function that handles the duplicate check result
-static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
+static void check_user_exists(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!ctx || !ctx->res)
-    {
-        printf("check_user_exists: Invalid context\n");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -174,7 +149,6 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("check_user_exists: DB check failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Database check failed");
-        free_ctx(ctx->arena);;
         return;
     }
 
@@ -186,7 +160,6 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("check_user_exists: Username or email already exists\n");
         send_text(ctx->res, 409, "Username or email already exists");
-        free_ctx(ctx->arena);;
         return;
     }
 
@@ -208,10 +181,9 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
         ctx->about};
 
     // Queue the async insert query using the same pg context
-    if (pquv_queue(pg, insert_sql, 5, insert_params, add_user_result, ctx) != 0)
+    if (query_queue(pg, insert_sql, 5, insert_params, add_user_result, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue insert query");
-        free_ctx(ctx->arena);;
         return;
     }
 
@@ -219,15 +191,9 @@ static void check_user_exists(pg_async_t *pg, PGresult *result, void *data)
 }
 
 // Callback function that handles the database insert result
-static void add_user_result(pg_async_t *pg, PGresult *result, void *data)
+static void add_user_result(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!ctx || !ctx->res)
-    {
-        printf("add_user_result: Invalid context\n");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -241,6 +207,4 @@ static void add_user_result(pg_async_t *pg, PGresult *result, void *data)
         printf("add_user_result: DB insert failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "DB insert failed");
     }
-
-    free_ctx(ctx->arena);;
 }

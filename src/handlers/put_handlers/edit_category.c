@@ -3,12 +3,12 @@
 #include "connection.h"
 #include "context.h"
 #include "utils.h"
-#include <time.h>
 #include "slugify.h"
+#include <time.h>
+#include <stdio.h>
 
 typedef struct
 {
-    Arena *arena;
     Res *res;
     char *category;
     char *original_slug;
@@ -16,14 +16,14 @@ typedef struct
     char *author_id;
 } ctx_t;
 
-static void on_query_category(pg_async_t *pg, PGresult *result, void *data);
-static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data);
-static void update_category(pg_async_t *pg, ctx_t *ctx);
-static void on_category_updated(pg_async_t *pg, PGresult *result, void *data);
+static void on_query_category(PGquery *pg, PGresult *result, void *data);
+static void on_check_new_slug(PGquery *pg, PGresult *result, void *data);
+static void update_category(PGquery *pg, ctx_t *ctx);
+static void on_category_updated(PGquery *pg, PGresult *result, void *data);
 
 void edit_category(Req *req, Res *res)
 {
-    auth_context_t *auth_ctx = (auth_context_t *)get_context(req);
+    auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
     if (!auth_ctx || !auth_ctx->is_author)
     {
@@ -31,7 +31,7 @@ void edit_category(Req *req, Res *res)
         return;
     }
 
-    const char *slug = get_params(req, "category");
+    const char *slug = get_param(req, "category");
     if (!slug)
     {
         send_text(res, 400, "Category slug is required");
@@ -65,49 +65,34 @@ void edit_category(Req *req, Res *res)
         return;
     }
 
-    // Create separate arena for async operation
-    Arena *async_arena = calloc(1, sizeof(Arena));
-    if (!async_arena) {
-        cJSON_Delete(json);
-        free(new_slug);
-        send_text(res, 500, "Arena allocation failed");
-        return;
-    }
-
     // Create context to hold all the data for async operation
-    ctx_t *ctx = arena_alloc(async_arena, sizeof(ctx_t));
-    if (!ctx) {
-        arena_free(async_arena);
-        free(async_arena);
+    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    if (!ctx)
+    {
         cJSON_Delete(json);
         free(new_slug);
         send_text(res, 500, "Context allocation failed");
         return;
     }
 
-    // Store arena reference
-    ctx->arena = async_arena;
-
-    ctx->res = arena_copy_res(async_arena, res);
+    ctx->res = res;
     if (!ctx->res)
     {
-        free_ctx(ctx->arena);
         cJSON_Delete(json);
         free(new_slug);
         send_text(res, 500, "Response copy failed");
         return;
     }
 
-    ctx->category = arena_strdup(async_arena, category);
-    ctx->original_slug = arena_strdup(async_arena, slug);
-    ctx->new_slug = arena_strdup(async_arena, new_slug);
-    ctx->author_id = arena_strdup(async_arena, author_id);
+    ctx->category = ecewo_strdup(res, category);
+    ctx->original_slug = ecewo_strdup(res, slug);
+    ctx->new_slug = ecewo_strdup(res, new_slug);
+    ctx->author_id = ecewo_strdup(res, author_id);
 
     free(new_slug);
 
     if (!ctx->category || !ctx->author_id)
     {
-        free_ctx(ctx->arena);
         cJSON_Delete(json);
         send_text(res, 500, "Memory allocation failed");
         return;
@@ -115,10 +100,9 @@ void edit_category(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    pg_async_t *pg = pquv_create(db, ctx);
+    PGquery *pg = query_create(db, ctx);
     if (!pg)
     {
-        free_ctx(ctx->arena);
         send_text(res, 500, "Database connection error");
         return;
     }
@@ -126,41 +110,30 @@ void edit_category(Req *req, Res *res)
     const char *select_sql = "SELECT id, author_id FROM categories WHERE slug = $1";
     const char *params[] = {ctx->original_slug};
 
-    int query_result = pquv_queue(pg, select_sql, 1, params, on_query_category, ctx);
+    int query_result = query_queue(pg, select_sql, 1, params, on_query_category, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pquv_execute(pg);
+    int exec_result = query_execute(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
-        free_ctx(ctx->arena);
         send_text(res, 500, "Failed to execute query");
         return;
     }
 }
 
-static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
+static void on_query_category(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!ctx || !ctx->res)
-    {
-        printf("on_query_category: Invalid context\n");
-        if (ctx)
-            free_ctx(ctx->arena);
-        return;
-    }
-
     if (!result)
     {
-        printf("ERROR: Result is NULL\n");
-        free_ctx(ctx->arena);
+        send_text(ctx->res, 500, "Result is NULL");
         return;
     }
 
@@ -170,7 +143,6 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_query_category: DB check failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Database check failed");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -178,7 +150,6 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_query_category: Category not found\n");
         send_text(ctx->res, 404, "Category not found");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -187,10 +158,9 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
         const char *check_slug_sql = "SELECT 1 FROM categories WHERE slug = $1 AND slug != $2";
         const char *check_params[] = {ctx->new_slug, ctx->original_slug};
 
-        if (pquv_queue(pg, check_slug_sql, 2, check_params, on_check_new_slug, ctx) != 0)
+        if (query_queue(pg, check_slug_sql, 2, check_params, on_check_new_slug, ctx) != 0)
         {
             send_text(ctx->res, 500, "Failed to queue slug check query");
-            free_ctx(ctx->arena);
             return;
         }
     }
@@ -201,22 +171,13 @@ static void on_query_category(pg_async_t *pg, PGresult *result, void *data)
     }
 }
 
-static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
+static void on_check_new_slug(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!ctx || !ctx->res)
-    {
-        printf("on_check_new_slug: Invalid context\n");
-        if (ctx)
-            free_ctx(ctx->arena);
-        return;
-    }
-
     if (!result)
     {
-        printf("ERROR: Result is NULL\n");
-        free_ctx(ctx->arena);
+        send_text(ctx->res, 500, "Result is NULL");
         return;
     }
 
@@ -226,7 +187,6 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_check_new_slug: DB check failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Database check failed");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -234,14 +194,13 @@ static void on_check_new_slug(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_check_new_slug: New slug already exists\n");
         send_text(ctx->res, 409, "A category with this title already exists");
-        free_ctx(ctx->arena);
         return;
     }
 
     update_category(pg, ctx);
 }
 
-static void update_category(pg_async_t *pg, ctx_t *ctx)
+static void update_category(PGquery *pg, ctx_t *ctx)
 {
     const char *update_params[3] = {
         ctx->category,
@@ -256,30 +215,20 @@ static void update_category(pg_async_t *pg, ctx_t *ctx)
         "WHERE slug = $3 "
         "RETURNING id;";
 
-    if (pquv_queue(pg, update_sql, 3, update_params, on_category_updated, ctx) != 0)
+    if (query_queue(pg, update_sql, 3, update_params, on_category_updated, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue update query");
-        free_ctx(ctx->arena);
         return;
     }
 }
 
-static void on_category_updated(pg_async_t *pg, PGresult *result, void *data)
+static void on_category_updated(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!ctx || !ctx->res)
-    {
-        printf("on_category_updated: Invalid context\n");
-        if (ctx)
-            free_ctx(ctx->arena);
-        return;
-    }
-
     if (!result)
     {
-        printf("ERROR: Result is NULL\n");
-        free_ctx(ctx->arena);
+        send_text(ctx->res, 500, "Result is NULL");
         return;
     }
 
@@ -289,7 +238,6 @@ static void on_category_updated(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_category_updated: Update failed: %s\n", PQresultErrorMessage(result));
         send_text(ctx->res, 500, "Category update failed");
-        free_ctx(ctx->arena);
         return;
     }
 
@@ -297,10 +245,8 @@ static void on_category_updated(pg_async_t *pg, PGresult *result, void *data)
     {
         printf("on_category_updated: No rows affected\n");
         send_text(ctx->res, 404, "Category not found or not updated");
-        free_ctx(ctx->arena);
         return;
     }
 
     send_text(ctx->res, 200, "Category updated successfully");
-    free_ctx(ctx->arena);
 }
