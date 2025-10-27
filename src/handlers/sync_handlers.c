@@ -1,6 +1,6 @@
 #include "handlers.h"
 #include "db.h" // extern PGconn *db;
-#include "ecewo-session.h"
+#include "ecewo/session.h"
 #include "context.h"
 #include "slugify.h"
 #include <stdio.h>

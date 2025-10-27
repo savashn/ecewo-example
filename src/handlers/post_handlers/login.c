@@ -1,6 +1,6 @@
 #include <sodium.h>
 #include "handlers.h"
-#include "ecewo-session.h"
+#include "ecewo/session.h"
 #include <stdio.h>
 
 typedef struct
@@ -107,7 +107,7 @@ static void on_user_found(PGquery *pg, PGresult *result, void *data)
         return;
     }
 
-    ExecStatusType status = PQresultStatus(result);
+    PQresultStatus(result);
 
     if (PQntuples(result) == 0)
     {

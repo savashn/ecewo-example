@@ -4,17 +4,23 @@ project(ecewo_blog_app VERSION 1.0.0 LANGUAGES C)
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
-# set(CMAKE_BUILD_TYPE Debug)
-set(CMAKE_BUILD_TYPE Release)
+set(CMAKE_BUILD_TYPE Debug)
+# set(CMAKE_BUILD_TYPE Release)
 
 include(FetchContent)
 
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG v2.0.0
+    GIT_TAG v2.2.0
     GIT_SHALLOW TRUE
 )
+
+set(ECEWO_POSTGRES ON CACHE BOOL "Build PostgreSQL integration module" FORCE)
+set(ECEWO_COOKIE ON CACHE BOOL "Build cookie module" FORCE)
+set(ECEWO_SESSION ON CACHE BOOL "Build session module" FORCE)
+set(ECEWO_CORS ON CACHE BOOL "Build CORS module" FORCE)
+set(ECEWO_HELMET ON CACHE BOOL "Build helmet module" FORCE)
 
 FetchContent_MakeAvailable(ecewo)
 
@@ -42,11 +48,6 @@ add_executable(server
     vendors/cJSON.c
     vendors/dotenv.c
     vendors/slugify.c
-    vendors/ecewo-session.c
-    vendors/ecewo-postgres.c
-    vendors/ecewo-cookie.c
-    vendors/ecewo-cors.c
-    vendors/ecewo-helmet.c
 )
 
 target_include_directories(server PRIVATE

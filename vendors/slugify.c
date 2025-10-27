@@ -1,14 +1,32 @@
+// MIT License
+
+// Copyright (c) 2025 Savas Sahin
+
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 #include "slugify.h"
 #include <string.h>
 #include <ctype.h>
+#include <stdint.h>
 
-/* Platform-specific includes */
-#ifdef _WIN32
-#include <windows.h>
-#include <winnls.h>
-#endif
+static const char DEFAULT_SEPARATOR = '-';
 
-/* UTF-8 utility functions */
 static int utf8_char_length(unsigned char c)
 {
     if (c < 0x80)
@@ -19,36 +37,41 @@ static int utf8_char_length(unsigned char c)
         return 3;
     if ((c & 0xF8) == 0xF0)
         return 4;
-    return 1; /* Invalid UTF-8, treat as single byte */
+    return 1;
 }
 
-/* Check for overlong encodings and invalid sequences */
-static int is_overlong_encoding(const char *str, size_t char_len, uint32_t codepoint)
+static int is_overlong_encoding(size_t char_len, uint32_t codepoint)
 {
     switch (char_len)
     {
     case 2:
-        /* 2-byte sequence should encode values >= 0x80 */
+        // 2-byte sequence should encode values >= 0x80
         return codepoint < 0x80;
     case 3:
-        /* 3-byte sequence should encode values >= 0x800 */
+        // 3-byte sequence should encode values >= 0x800
         return codepoint < 0x800;
     case 4:
-        /* 4-byte sequence should encode values >= 0x10000 */
+        // 4-byte sequence should encode values >= 0x10000
         return codepoint < 0x10000;
     default:
         return 0;
     }
 }
 
-/* Secure UTF-8 decoder with overlong protection */
-static uint32_t utf8_decode_secure(const char *str, size_t *consumed, int *is_valid)
+static uint32_t utf8_decode(const char *str, size_t str_len, size_t *consumed, bool *is_valid)
 {
+    if (str_len == 0)
+    {
+        *is_valid = false;
+        *consumed = 0;
+        return 0;
+    }
+
     unsigned char c = (unsigned char)str[0];
     uint32_t codepoint = 0;
     size_t char_len = 0;
 
-    *is_valid = 1;
+    *is_valid = true;
     *consumed = 1;
 
     if (c < 0x80)
@@ -58,24 +81,34 @@ static uint32_t utf8_decode_secure(const char *str, size_t *consumed, int *is_va
     else if ((c & 0xE0) == 0xC0)
     {
         char_len = 2;
-        codepoint = (c & 0x1F) << 6;
-        if ((str[1] & 0xC0) != 0x80)
+        if (str_len < 2)
         {
-            *is_valid = 0;
+            *is_valid = false;
             return 0;
         }
+        if ((str[1] & 0xC0) != 0x80)
+        {
+            *is_valid = false;
+            return 0;
+        }
+        codepoint = (c & 0x1F) << 6;
         codepoint |= (str[1] & 0x3F);
         *consumed = 2;
     }
     else if ((c & 0xF0) == 0xE0)
     {
         char_len = 3;
-        codepoint = (c & 0x0F) << 12;
-        if ((str[1] & 0xC0) != 0x80 || (str[2] & 0xC0) != 0x80)
+        if (str_len < 3)
         {
-            *is_valid = 0;
+            *is_valid = false;
             return 0;
         }
+        if ((str[1] & 0xC0) != 0x80 || (str[2] & 0xC0) != 0x80)
+        {
+            *is_valid = false;
+            return 0;
+        }
+        codepoint = (c & 0x0F) << 12;
         codepoint |= ((str[1] & 0x3F) << 6);
         codepoint |= (str[2] & 0x3F);
         *consumed = 3;
@@ -83,12 +116,17 @@ static uint32_t utf8_decode_secure(const char *str, size_t *consumed, int *is_va
     else if ((c & 0xF8) == 0xF0)
     {
         char_len = 4;
-        codepoint = (c & 0x07) << 18;
-        if ((str[1] & 0xC0) != 0x80 || (str[2] & 0xC0) != 0x80 || (str[3] & 0xC0) != 0x80)
+        if (str_len < 4)
         {
-            *is_valid = 0;
+            *is_valid = false;
             return 0;
         }
+        if ((str[1] & 0xC0) != 0x80 || (str[2] & 0xC0) != 0x80 || (str[3] & 0xC0) != 0x80)
+        {
+            *is_valid = false;
+            return 0;
+        }
+        codepoint = (c & 0x07) << 18;
         codepoint |= ((str[1] & 0x3F) << 12);
         codepoint |= ((str[2] & 0x3F) << 6);
         codepoint |= (str[3] & 0x3F);
@@ -96,24 +134,22 @@ static uint32_t utf8_decode_secure(const char *str, size_t *consumed, int *is_va
     }
     else
     {
-        *is_valid = 0;
+        *is_valid = false;
         return 0;
     }
 
-    /* Check for overlong encodings */
-    if (is_overlong_encoding(str, char_len, codepoint))
+    if (is_overlong_encoding(char_len, codepoint))
     {
-        *is_valid = 0;
+        *is_valid = false;
         return 0;
     }
 
-    /* Additional security checks */
-    if (codepoint > 0x10FFFF ||                         /* Beyond Unicode range */
-        (codepoint >= 0xD800 && codepoint <= 0xDFFF) || /* UTF-16 surrogates */
-        (codepoint >= 0xFDD0 && codepoint <= 0xFDEF) || /* Non-characters */
+    if (codepoint > 0x10FFFF ||
+        (codepoint >= 0xD800 && codepoint <= 0xDFFF) ||
+        (codepoint >= 0xFDD0 && codepoint <= 0xFDEF) ||
         (codepoint & 0xFFFE) == 0xFFFE)
-    { /* Non-characters */
-        *is_valid = 0;
+    {
+        *is_valid = false;
         return 0;
     }
 
@@ -132,7 +168,6 @@ static int is_utf8_valid(const char *str, size_t len)
 
         uint32_t codepoint = 0;
 
-        /* Validate continuation bytes and decode codepoint */
         if (char_len == 1)
         {
             codepoint = c;
@@ -157,22 +192,21 @@ static int is_utf8_valid(const char *str, size_t len)
         }
         else
         {
-            return 0; /* Invalid first byte */
+            return 0;
         }
 
-        /* Check for overlong encodings */
-        if (is_overlong_encoding(&str[i], char_len, codepoint))
+        if (is_overlong_encoding(char_len, codepoint))
             return 0;
 
-        /* Check for invalid Unicode ranges */
+        // Check for invalid Unicode ranges
         if (codepoint > 0x10FFFF)
-            return 0; /* Beyond valid Unicode range */
+            return 0;
 
-        /* Check for UTF-16 surrogates (invalid in UTF-8) */
+        // Check for UTF-16 surrogates (invalid in UTF-8)
         if (codepoint >= 0xD800 && codepoint <= 0xDFFF)
             return 0;
 
-        /* Check for non-characters */
+        // Check for non-characters
         if ((codepoint >= 0xFDD0 && codepoint <= 0xFDEF) ||
             (codepoint & 0xFFFE) == 0xFFFE)
             return 0;
@@ -182,7 +216,6 @@ static int is_utf8_valid(const char *str, size_t len)
     return 1;
 }
 
-/* Comprehensive transliteration table */
 static const struct
 {
     uint32_t unicode;
@@ -210,34 +243,34 @@ static const struct
     {0xC2, "A"},
     {0xC3, "A"},
     {0xC4, "A"},
-    {0xC5, "A"}, /* À-Å */
+    {0xC5, "A"},
     {0xC6, "AE"},
-    {0xC7, "C"}, /* Æ, Ç */
+    {0xC7, "C"},
     {0xC8, "E"},
     {0xC9, "E"},
     {0xCA, "E"},
-    {0xCB, "E"}, /* È-Ë */
+    {0xCB, "E"},
     {0xCC, "I"},
     {0xCD, "I"},
     {0xCE, "I"},
-    {0xCF, "I"}, /* Ì-Ï */
+    {0xCF, "I"},
     {0xD0, "D"},
-    {0xD1, "N"}, /* Ð, Ñ */
+    {0xD1, "N"},
     {0xD2, "O"},
     {0xD3, "O"},
     {0xD4, "O"},
     {0xD5, "O"},
     {0xD6, "O"},
-    {0xD8, "O"}, /* Ò-Ö, Ø */
+    {0xD8, "O"},
     {0xD9, "U"},
     {0xDA, "U"},
     {0xDB, "U"},
-    {0xDC, "U"}, /* Ù-Ü */
+    {0xDC, "U"},
     {0xDD, "Y"},
     {0xDE, "TH"},
-    {0xDF, "ss"}, /* Ý, Þ, ß */
+    {0xDF, "ss"},
 
-    /* Lowercase versions */
+    /* Lowercase */
     {0xE0, "a"},
     {0xE1, "a"},
     {0xE2, "a"},
@@ -661,7 +694,7 @@ static const struct
     {0x10EF, "j"},
     {0x10F0, "h"},
 
-    /* Vietnamese Extended */
+    /* Vietnamese */
     {0x1EA0, "A"},
     {0x1EA1, "a"},
     {0x1EA2, "A"},
@@ -753,7 +786,7 @@ static const struct
     {0x1EF8, "Y"},
     {0x1EF9, "y"},
 
-    /* Punctuation and symbols */
+    /* Punctuation */
     {0x2013, "-"},
     {0x2018, "'"},
     {0x2019, "'"},
@@ -798,94 +831,70 @@ static const struct
     {0x2665, "love"},
     {0x5143, "yuan"},
     {0x5186, "yen"},
-    {0xFDFC, "rial"},
     {0xFDF5, "laa"},
     {0xFDF7, "laa"},
     {0xFDF9, "lai"},
     {0xFDFB, "la"},
+    {0xFDFC, "rial"},
 
     {0, NULL} /* End marker */
 };
 
-/* Binary search in transliteration table */
 static const char *transliterate_char(uint32_t codepoint)
 {
-    int lo = 0, hi = (sizeof(transliteration_table) / sizeof(transliteration_table[0])) - 2;
-    while (lo <= hi)
+    int left_index = 0;
+    int right_index = (sizeof(transliteration_table) / sizeof(transliteration_table[0])) - 2;
+
+    while (left_index <= right_index)
     {
-        int mid = (lo + hi) >> 1;
-        uint32_t u = transliteration_table[mid].unicode;
-        if (u == codepoint)
-            return transliteration_table[mid].ascii;
-        if (u < codepoint)
-            lo = mid + 1;
+        int middle_index = left_index + (right_index - left_index) / 2;
+        uint32_t current_unicode = transliteration_table[middle_index].unicode;
+
+        if (current_unicode == codepoint)
+            return transliteration_table[middle_index].ascii;
+
+        if (current_unicode < codepoint)
+            left_index = middle_index + 1;
         else
-            hi = mid - 1;
+            right_index = middle_index - 1;
     }
+
     return NULL;
 }
 
-static uint32_t utf8_decode(const char *str, size_t *consumed)
+static void slugify_apply_defaults(Slugify *opts)
 {
-    unsigned char c = (unsigned char)str[0];
-    uint32_t codepoint = 0;
-
-    if (c < 0x80)
-    {
-        *consumed = 1;
-        return c;
-    }
-    else if ((c & 0xE0) == 0xC0)
-    {
-        *consumed = 2;
-        codepoint = (c & 0x1F) << 6;
-        codepoint |= (str[1] & 0x3F);
-    }
-    else if ((c & 0xF0) == 0xE0)
-    {
-        *consumed = 3;
-        codepoint = (c & 0x0F) << 12;
-        codepoint |= ((str[1] & 0x3F) << 6);
-        codepoint |= (str[2] & 0x3F);
-    }
-    else if ((c & 0xF8) == 0xF0)
-    {
-        *consumed = 4;
-        codepoint = (c & 0x07) << 18;
-        codepoint |= ((str[1] & 0x3F) << 12);
-        codepoint |= ((str[2] & 0x3F) << 6);
-        codepoint |= (str[3] & 0x3F);
-    }
-    else
-    {
-        *consumed = 1;
-        return c; /* Invalid UTF-8 */
-    }
-
-    return codepoint;
+    if (opts->separator == 0)
+        opts->separator = DEFAULT_SEPARATOR;
 }
 
-static slugify_options_t slugify_default_options(void)
-{
-    slugify_options_t opts = {0};
-    opts.preserve_case = false;
-    opts.separator = '-';
-    opts.max_length = 0;
-    return opts;
-}
-
-static size_t slugify_length(const char *input, const slugify_options_t *options)
+static size_t slugify_length(const char *input, const Slugify *options)
 {
     if (!input)
         return 0;
 
-    slugify_options_t opts = options ? *options : slugify_default_options();
-    size_t estimated = 0;
+    Slugify opts = {0};
 
-    for (size_t i = 0; input[i] != '\0';)
+    if (options)
+        opts = *options;
+
+    slugify_apply_defaults(&opts);
+
+    size_t estimated = 0;
+    size_t input_len = strlen(input);
+
+    for (size_t i = 0; i < input_len;)
     {
         size_t consumed;
-        uint32_t codepoint = utf8_decode(&input[i], &consumed);
+        bool is_valid;
+        size_t remaining = input_len - i;
+        uint32_t codepoint = utf8_decode(&input[i], remaining, &consumed, &is_valid);
+
+        if (!is_valid)
+        {
+            i += 1;
+            continue;
+        }
 
         if (codepoint < 128)
         {
@@ -907,49 +916,62 @@ static size_t slugify_length(const char *input, const slugify_options_t *options
                 }
             }
         }
-        else if (opts.preserve_case)
-        {
-            estimated += consumed;
-        }
         else
         {
-            const char *trans = transliterate_char(codepoint);
-            if (trans)
+            // Non-ASCII characters
+            if (opts.preserve_case)
             {
-                estimated += strlen(trans);
+                estimated += consumed;
+            }
+            else
+            {
+                const char *trans = transliterate_char(codepoint);
+                if (trans)
+                {
+                    estimated += strlen(trans);
+                }
             }
         }
 
         i += consumed;
     }
 
-    return estimated + 1; /* +1 for null terminator */
+    return estimated + 1;
 }
 
 static int slugify_ex(const char *input, char *output, size_t out_size,
-                      const slugify_options_t *options)
+                      const Slugify *options)
 {
     if (!input || !output || out_size == 0)
     {
         return SLUGIFY_ERROR_INVALID;
     }
 
-    slugify_options_t opts = options ? *options : slugify_default_options();
-    size_t j = 0; // output index
+    Slugify opts = {0};
 
+    if (options)
+        opts = *options;
+
+    slugify_apply_defaults(&opts);
+
+    size_t j = 0;
     size_t input_len = strlen(input);
-    if (!is_utf8_valid(input, input_len))
-    {
-        return SLUGIFY_ERROR_INVALID;
-    }
 
-    for (size_t i = 0; input[i] != '\0' && j < out_size - 1;)
+    if (!is_utf8_valid(input, input_len))
+        return SLUGIFY_ERROR_INVALID;
+
+    for (size_t i = 0; i < input_len;)
     {
         size_t consumed = 0;
-        uint32_t codepoint = utf8_decode(&input[i], &consumed);
+        bool is_valid = false;
+        size_t remaining = input_len - i;
+        uint32_t codepoint = utf8_decode(&input[i], remaining, &consumed, &is_valid);
 
-        if (opts.max_length > 0 && j >= opts.max_length)
-            break;
+        if (!is_valid)
+        {
+            i += 1;
+            continue;
+        }
 
         if (codepoint < 128)
         {
@@ -957,6 +979,9 @@ static int slugify_ex(const char *input, char *output, size_t out_size,
 
             if (isalnum((unsigned char)c))
             {
+                if (opts.max_length > 0 && j >= opts.max_length)
+                    break;
+
                 char out_char = (opts.preserve_case) ? c : (char)tolower((unsigned char)c);
 
                 if (j + 1 >= out_size)
@@ -970,6 +995,10 @@ static int slugify_ex(const char *input, char *output, size_t out_size,
                 if (trans)
                 {
                     size_t trans_len = strlen(trans);
+
+                    if (opts.max_length > 0 && j + trans_len > opts.max_length)
+                        break;
+
                     if (j + trans_len >= out_size)
                         return SLUGIFY_ERROR_BUFFER;
 
@@ -977,31 +1006,30 @@ static int slugify_ex(const char *input, char *output, size_t out_size,
                     {
                         char c2 = (opts.preserve_case) ? trans[k] : (char)tolower((unsigned char)trans[k]);
                         output[j++] = c2;
-
-                        if (opts.max_length > 0 && j >= opts.max_length)
-                            break;
                     }
                 }
                 else if (isspace((unsigned char)c) || c == '-' || c == '_' || ispunct((unsigned char)c))
                 {
-                    // Collapse multiple separators into one
                     if (j > 0 && output[j - 1] != opts.separator)
                     {
+                        if (opts.max_length > 0 && j >= opts.max_length)
+                            break;
+
                         if (j + 1 >= out_size)
                             return SLUGIFY_ERROR_BUFFER;
                         output[j++] = opts.separator;
                     }
                 }
-                // Ignore other punctuation characters without transliteration
             }
         }
         else
         {
             // Non-ASCII characters
-
             if (opts.preserve_case)
             {
-                // Copy UTF-8 bytes directly
+                if (opts.max_length > 0 && j + consumed > opts.max_length)
+                    break;
+
                 if (j + consumed >= out_size)
                     return SLUGIFY_ERROR_BUFFER;
 
@@ -1012,11 +1040,14 @@ static int slugify_ex(const char *input, char *output, size_t out_size,
             }
             else
             {
-                // Attempt to transliterate
                 const char *trans = transliterate_char(codepoint);
                 if (trans)
                 {
                     size_t trans_len = strlen(trans);
+
+                    if (opts.max_length > 0 && j + trans_len > opts.max_length)
+                        break;
+
                     if (j + trans_len >= out_size)
                         return SLUGIFY_ERROR_BUFFER;
 
@@ -1024,12 +1055,8 @@ static int slugify_ex(const char *input, char *output, size_t out_size,
                     {
                         char c2 = (opts.preserve_case) ? trans[k] : (char)tolower((unsigned char)trans[k]);
                         output[j++] = c2;
-
-                        if (opts.max_length > 0 && j >= opts.max_length)
-                            break;
                     }
                 }
-                // If no transliteration, skip the character (do not add anything)
             }
         }
 
@@ -1038,35 +1065,32 @@ static int slugify_ex(const char *input, char *output, size_t out_size,
 
     // Remove trailing separator if present
     if (j > 0 && output[j - 1] == opts.separator)
-    {
         j--;
-    }
 
     if (j == 0)
-    {
         return SLUGIFY_ERROR_EMPTY;
-    }
 
     output[j] = '\0';
     return SLUGIFY_SUCCESS;
 }
 
-char *slugify(const char *input, const slugify_options_t *options)
+char *slugify(const char *input, const Slugify *options)
 {
-    // If options is NULL, use default options
-    slugify_options_t opts = options ? *options : slugify_default_options();
+    Slugify opts = {0};
 
-    // Calculate the required buffer length
+    if (options)
+        opts = *options;
+
+    slugify_apply_defaults(&opts);
+
     size_t len = slugify_length(input, &opts);
     if (len == 0)
         return NULL;
 
-    // Allocate the buffer
     char *buf = malloc(len);
     if (!buf)
         return NULL;
 
-    // Generate the slug
     int rc = slugify_ex(input, buf, len, &opts);
     if (rc != SLUGIFY_SUCCESS)
     {
@@ -1074,6 +1098,5 @@ char *slugify(const char *input, const slugify_options_t *options)
         return NULL;
     }
 
-    // Return the buffer on success
     return buf;
 }

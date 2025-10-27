@@ -3,7 +3,7 @@
 
 void register_routers(void)
 {
-    get("/user/:user/posts/filter", use(is_authors_self), get_posts_by_cat);
+    get("/user/:user/filter/posts", use(is_authors_self), get_posts_by_cat);
 
     get("/user/:user/posts/:post", use(is_authors_self), get_post);
     put("/user/:user/posts/:post", use(auth_only, is_authors_self), edit_post);

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <sodium.h>
 #include "handlers.h"
-#include "ecewo-session.h"
+#include "ecewo/session.h"
 
 // Structure to hold request context for async operations
 typedef struct

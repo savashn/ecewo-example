@@ -1,10 +1,10 @@
-#include "ecewo-cors.h"
-#include "ecewo-helmet.h"
+#include "ecewo/cors.h"
+#include "ecewo/helmet.h"
+#include "ecewo/session.h"
 #include "sodium.h"
 #include "dotenv.h"
 #include "db.h"
 #include "routers.h"
-#include "ecewo-session.h"
 #include "middlewares.h"
 #include <stdio.h>
 

@@ -3,22 +3,6 @@
 
 PGconn *db = NULL;
 
-static void exit_on_error(PGconn *conn, PGresult *res)
-{
-    if (res)
-    {
-        fprintf(stderr, "ERROR: %s\n", PQresultErrorMessage(res));
-        PQclear(res);
-    }
-    else if (conn)
-    {
-        fprintf(stderr, "ERROR: %s\n", PQerrorMessage(conn));
-    }
-    if (conn)
-        PQfinish(conn);
-    exit(EXIT_FAILURE);
-}
-
 static int exec_sql(const char *sql)
 {
     PGresult *res = PQexec(db, sql);

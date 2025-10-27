@@ -7,6 +7,7 @@ typedef struct
     Res *res;
     const char *username;
     const char *post_slug;
+    bool is_author;
 } ctx_t;
 
 static void on_query_posts(PGquery *pg, PGresult *result, void *data);
@@ -14,7 +15,7 @@ static void on_query_posts(PGquery *pg, PGresult *result, void *data);
 void get_post(Req *req, Res *res)
 {
     const char *post_slug = get_param(req, "post");
-
+    
     auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
     if (!auth_ctx)
     {
@@ -22,10 +23,19 @@ void get_post(Req *req, Res *res)
         return;
     }
 
-    const char *user_slug = auth_ctx->user_slug;
-    bool is_author = auth_ctx->is_author;
+    if (!auth_ctx->user_slug)
+    {
+        send_text(res, 500, "User slug not set in auth context");
+        return;
+    }
 
-    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    if (!post_slug)
+    {
+        send_text(res, 400, "Post slug missing from URL parameters");
+        return;
+    }
+
+    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Context allocation failed");
@@ -33,14 +43,9 @@ void get_post(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
-    ctx->username = user_slug;
+    ctx->username = auth_ctx->user_slug;
     ctx->post_slug = post_slug;
+    ctx->is_author = auth_ctx->is_author;
 
     PGquery *pg = query_create(db, ctx);
     if (!pg)
@@ -49,8 +54,9 @@ void get_post(Req *req, Res *res)
         return;
     }
 
-    char *select_sql;
-    if (is_author)
+    const char *select_sql;
+    
+    if (ctx->is_author)
     {
         select_sql = "SELECT p.id, p.header, p.slug, p.content, p.reading_time, "
                      "       p.author_id, u.username, p.created_at, p.updated_at, p.is_hidden, "
@@ -80,7 +86,7 @@ void get_post(Req *req, Res *res)
     }
 
     const char *params[] = {ctx->username, ctx->post_slug};
-
+    
     int qr = query_queue(pg, select_sql, 2, params, on_query_posts, ctx);
     if (qr != 0)
     {
@@ -156,8 +162,9 @@ static void on_query_posts(PGquery *pg, PGresult *result, void *data)
     cJSON_AddStringToObject(response, "updated_at", updated_at_val);
 
     char *is_hidden_val = PQgetvalue(result, 0, PQfnumber(result, "is_hidden"));
-
-    cJSON_AddBoolToObject(response, "is_hidden", strcmp(is_hidden_val, "t") == 0);
+    bool is_hidden = (strcmp(is_hidden_val, "t") == 0);
+    
+    cJSON_AddBoolToObject(response, "is_hidden", is_hidden);
 
     char *cats = PQgetvalue(result, 0, PQfnumber(result, "categories"));
     char *slugs = PQgetvalue(result, 0, PQfnumber(result, "category_slugs"));
@@ -191,7 +198,6 @@ static void on_query_posts(PGquery *pg, PGresult *result, void *data)
         stok = strtok_r(s_copy, ",", &save2);
         itok = strtok_r(i_copy, ",", &save3);
 
-        int cat_count = 0;
         while (ctok && stok && itok)
         {
             cJSON *o = cJSON_CreateObject();
