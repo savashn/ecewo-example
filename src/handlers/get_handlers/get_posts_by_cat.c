@@ -22,7 +22,7 @@ void get_posts_by_cat(Req *req, Res *res)
 
     auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
-    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Context allocation failed");

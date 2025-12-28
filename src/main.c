@@ -1,6 +1,6 @@
-#include "ecewo/cors.h"
-#include "ecewo/helmet.h"
-#include "ecewo/session.h"
+#include "ecewo-cors.h"
+#include "ecewo-helmet.h"
+#include "ecewo-session.h"
 #include "sodium.h"
 #include "dotenv.h"
 #include "db.h"
@@ -24,15 +24,26 @@ void destroy_app(void)
 
 int main(void)
 {
-    if (server_init() != SERVER_OK)
+    if (server_init() != 0)
     {
         fprintf(stderr, "Failed to initialize server\n");
         return 1;
     }
 
     env_load("..", false);
-    const char *port = getenv("PORT");
-    const int PORT = (int)atoi(port);
+
+    const char *port_str = getenv("PORT");
+    if (!port_str) {
+        fprintf(stderr, "PORT is not set\n");
+        return 1;
+    }
+
+    char *end = NULL;
+    long port = strtol(port_str, &end, 10);
+    if (*end != '\0' || port <= 0 || port > 65535) {
+        fprintf(stderr, "Invalid PORT: %s\n", port_str);
+        return 1;
+    }
 
     cors_init(&cors);
     helmet_init(NULL);
@@ -44,13 +55,12 @@ int main(void)
         return 1;
     }
 
-    hook(is_auth); // Global middleware
-
+    use(is_auth);
     register_routers();
 
-    shutdown_hook(destroy_app);
+    server_atexit(destroy_app);
 
-    if (server_listen(PORT) != SERVER_OK)
+    if (server_listen(port) != 0)
     {
         fprintf(stderr, "Failed to start server\n");
         return 1;

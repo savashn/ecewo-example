@@ -87,7 +87,7 @@ void edit_post(Req *req, Res *res)
     int reading_time = compute_reading_time(content);
 
     // Create context to hold all the data for async operation
-    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         cJSON_Delete(json);
@@ -105,11 +105,11 @@ void edit_post(Req *req, Res *res)
         return;
     }
 
-    ctx->header = ecewo_strdup(res, header);
-    ctx->content = ecewo_strdup(res, content);
-    ctx->original_slug = ecewo_strdup(res, slug);
-    ctx->new_slug = ecewo_strdup(res, new_slug);
-    ctx->author_id = ecewo_strdup(res, auth_ctx->id);
+    ctx->header = arena_strdup(res->arena, header);
+    ctx->content = arena_strdup(res->arena, content);
+    ctx->original_slug = arena_strdup(res->arena, slug);
+    ctx->new_slug = arena_strdup(res->arena, new_slug);
+    ctx->author_id = arena_strdup(res->arena, auth_ctx->id);
     ctx->reading_time = reading_time;
     ctx->updated_at = (int)time(NULL);
     ctx->is_hidden = is_hidden;
@@ -133,7 +133,7 @@ void edit_post(Req *req, Res *res)
         int n = cJSON_GetArraySize(jcategories);
         if (n > 0)
         {
-            ctx->category_ids = ecewo_alloc(res, n * sizeof(int));
+            ctx->category_ids = arena_alloc(res->arena, n * sizeof(int));
             if (!ctx->category_ids)
             {
                 cJSON_Delete(json);
@@ -366,7 +366,7 @@ static void update_post_categories(PGquery *pg, ctx_t *ctx, const char *post_id)
     const char *delete_sql = "DELETE FROM post_categories WHERE post_id = $1";
     const char *delete_params[] = {post_id};
 
-    ctx->author_id = ecewo_strdup(ctx->res, post_id);
+    ctx->author_id = arena_strdup(ctx->res->arena, post_id);
     if (!ctx->author_id)
     {
         send_text(ctx->res, 500, "Memory allocation failed");
@@ -410,7 +410,7 @@ static void insert_new_categories(PGquery *pg, ctx_t *ctx)
     }
 
     size_t sql_size = 256 + (ctx->category_count * 32);
-    ctx->batch_sql = ecewo_alloc(ctx->res, sql_size);
+    ctx->batch_sql = arena_alloc(ctx->res->arena, sql_size);
     if (!ctx->batch_sql)
     {
         send_text(ctx->res, 500, "Memory allocation failed");
@@ -419,7 +419,7 @@ static void insert_new_categories(PGquery *pg, ctx_t *ctx)
 
     strcpy(ctx->batch_sql, "INSERT INTO post_categories (post_id, category_id) VALUES ");
 
-    ctx->batch_params = ecewo_alloc(ctx->res, ctx->category_count * 2 * sizeof(char *));
+    ctx->batch_params = arena_alloc(ctx->res->arena, ctx->category_count * 2 * sizeof(char *));
     if (!ctx->batch_params)
     {
         send_text(ctx->res, 500, "Memory allocation failed");
@@ -428,14 +428,14 @@ static void insert_new_categories(PGquery *pg, ctx_t *ctx)
 
     for (int i = 0; i < ctx->category_count; i++)
     {
-        char *category_str = ecewo_sprintf(ctx->res, "%d", ctx->category_ids[i]);
+        char *category_str = arena_sprintf(ctx->res->arena, "%d", ctx->category_ids[i]);
         if (!category_str)
         {
             send_text(ctx->res, 500, "Memory allocation failed");
             return;
         }
 
-        ctx->batch_params[i * 2] = ecewo_strdup(ctx->res, ctx->author_id);
+        ctx->batch_params[i * 2] = arena_strdup(ctx->res->arena, ctx->author_id);
         ctx->batch_params[i * 2 + 1] = category_str;
 
         if (!ctx->batch_params[i * 2] || !ctx->batch_params[i * 2 + 1])
@@ -447,7 +447,7 @@ static void insert_new_categories(PGquery *pg, ctx_t *ctx)
         if (i > 0)
             strcat(ctx->batch_sql, ", ");
 
-        char *value_part = ecewo_sprintf(ctx->res, "($%d, $%d)", i * 2 + 1, i * 2 + 2);
+        char *value_part = arena_sprintf(ctx->res->arena, "($%d, $%d)", i * 2 + 1, i * 2 + 2);
         if (!value_part)
         {
             send_text(ctx->res, 500, "Memory allocation failed");

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <sodium.h>
 #include "handlers.h"
-#include "ecewo/session.h"
+#include "ecewo-session.h"
 
 // Structure to hold request context for async operations
 typedef struct
@@ -51,7 +51,7 @@ void add_user(Req *req, Res *res)
     const char *about = cJSON_IsString(j_about) ? j_about->valuestring : "";
 
     // Create context to hold all the data for async operation
-    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         cJSON_Delete(json);
@@ -68,11 +68,11 @@ void add_user(Req *req, Res *res)
     }
 
     // Copy all strings to context (they need to persist after this function returns)
-    ctx->name = ecewo_strdup(res, name);
-    ctx->username = ecewo_strdup(res, username);
-    ctx->password = ecewo_strdup(res, password);
-    ctx->email = ecewo_strdup(res, email);
-    ctx->about = ecewo_strdup(res, about);
+    ctx->name = arena_strdup(res->arena, name);
+    ctx->username = arena_strdup(res->arena, username);
+    ctx->password = arena_strdup(res->arena, password);
+    ctx->email = arena_strdup(res->arena, email);
+    ctx->about = arena_strdup(res->arena, about);
 
     if (!ctx->name || !ctx->username || !ctx->password || !ctx->email || !ctx->about)
     {
@@ -82,7 +82,7 @@ void add_user(Req *req, Res *res)
     }
 
     // Hash the password
-    ctx->hashpw = ecewo_alloc(res, crypto_pwhash_STRBYTES);
+    ctx->hashpw = arena_alloc(res->arena, crypto_pwhash_STRBYTES);
     if (!ctx->hashpw)
     {
         cJSON_Delete(json);

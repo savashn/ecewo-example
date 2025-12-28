@@ -15,7 +15,7 @@ void get_all_users_async(Req *req, Res *res)
     const char *sql = "SELECT id, name, username FROM users;";
 
     // Create context to pass to callback
-    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Context allocation failed");

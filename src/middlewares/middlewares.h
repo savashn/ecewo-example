@@ -3,9 +3,9 @@
 
 #include "ecewo.h"
 
-int body_checker(Req *req, Res *res, Chain *chain);
-int is_auth(Req *req, Res *res, Chain *chain);
-int auth_only(Req *req, Res *res, Chain *chain);
-int is_authors_self(Req *req, Res *res, Chain *chain);
+void body_checker(Req *req, Res *res, Next next);
+void is_auth(Req *req, Res *res, Next next);
+void auth_only(Req *req, Res *res, Next next);
+void is_authors_self(Req *req, Res *res, Next next);
 
 #endif

@@ -43,7 +43,7 @@ void create_category(Req *req, Res *res)
     char *slug = slugify(category, NULL);
 
     // Allocate async context in the async arena
-    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
         free(slug);
@@ -61,9 +61,9 @@ void create_category(Req *req, Res *res)
         return;
     }
 
-    ctx->category = ecewo_strdup(ctx->res, category);
-    ctx->slug = ecewo_strdup(ctx->res, slug);
-    ctx->author_id = ecewo_strdup(ctx->res, author_id);
+    ctx->category = arena_strdup(ctx->res->arena, category);
+    ctx->slug = arena_strdup(ctx->res->arena, slug);
+    ctx->author_id = arena_strdup(ctx->res->arena, author_id);
 
     free(slug);
     cJSON_Delete(json);

@@ -66,7 +66,7 @@ void edit_category(Req *req, Res *res)
     }
 
     // Create context to hold all the data for async operation
-    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         cJSON_Delete(json);
@@ -84,10 +84,10 @@ void edit_category(Req *req, Res *res)
         return;
     }
 
-    ctx->category = ecewo_strdup(res, category);
-    ctx->original_slug = ecewo_strdup(res, slug);
-    ctx->new_slug = ecewo_strdup(res, new_slug);
-    ctx->author_id = ecewo_strdup(res, author_id);
+    ctx->category = arena_strdup(res->arena, category);
+    ctx->original_slug = arena_strdup(res->arena, slug);
+    ctx->new_slug = arena_strdup(res->arena, new_slug);
+    ctx->author_id = arena_strdup(res->arena, author_id);
 
     free(new_slug);
 

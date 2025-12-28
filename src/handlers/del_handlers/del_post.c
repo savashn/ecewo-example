@@ -21,7 +21,7 @@ void del_post(Req *req, Res *res)
     }
 
     // Allocate login context
-    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Context allocation failed");

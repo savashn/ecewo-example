@@ -35,7 +35,7 @@ void get_post(Req *req, Res *res)
         return;
     }
 
-    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         send_text(res, 500, "Context allocation failed");
@@ -180,9 +180,9 @@ static void on_query_posts(PGquery *pg, PGresult *result, void *data)
 
     if (cats && *cats)
     {
-        char *c_copy = ecewo_strdup(ctx->res, cats);
-        char *s_copy = ecewo_strdup(ctx->res, slugs);
-        char *i_copy = ecewo_strdup(ctx->res, ids);
+        char *c_copy = arena_strdup(ctx->res->arena, cats);
+        char *s_copy = arena_strdup(ctx->res->arena, slugs);
+        char *i_copy = arena_strdup(ctx->res->arena, ids);
         if (!c_copy || !s_copy || !i_copy)
         {
             cJSON_Delete(arr);

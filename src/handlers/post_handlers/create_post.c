@@ -65,7 +65,7 @@ void create_post(Req *req, Res *res)
     int reading_time = compute_reading_time(content);
 
     // Allocate async context in the async arena
-    ctx_t *ctx = ecewo_alloc(req, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
         free(slug);
@@ -83,10 +83,10 @@ void create_post(Req *req, Res *res)
         return;
     }
 
-    ctx->header = ecewo_strdup(res, header);
-    ctx->content = ecewo_strdup(res, content);
-    ctx->slug = ecewo_strdup(res, slug);
-    ctx->author_id = ecewo_strdup(res, author_id);
+    ctx->header = arena_strdup(res->arena, header);
+    ctx->content = arena_strdup(res->arena, content);
+    ctx->slug = arena_strdup(res->arena, slug);
+    ctx->author_id = arena_strdup(res->arena, author_id);
     ctx->reading_time = reading_time;
     ctx->created_at = (int)time(NULL);
     ctx->updated_at = ctx->created_at;
@@ -112,7 +112,7 @@ void create_post(Req *req, Res *res)
         int n = cJSON_GetArraySize(jcategories);
         if (n > 0)
         {
-            ctx->category_ids = ecewo_alloc(res, n * sizeof(int));
+            ctx->category_ids = arena_alloc(res->arena, n * sizeof(int));
             if (!ctx->category_ids)
             {
                 cJSON_Delete(json);
@@ -194,10 +194,10 @@ static void on_query_post(PGquery *pg, PGresult *result, void *data)
     printf("on_query_post: No duplicate found, proceeding with insert\n");
 
     // Prepare parameters for insert
-    char *reading_time_str = ecewo_sprintf(ctx->res, "%d", ctx->reading_time);
-    char *created_at_str = ecewo_sprintf(ctx->res, "%d", ctx->created_at);
-    char *updated_at_str = ecewo_sprintf(ctx->res, "%d", ctx->updated_at);
-    char *is_hidden_str = ecewo_sprintf(ctx->res, "%s", ctx->is_hidden ? "true" : "false");
+    char *reading_time_str = arena_sprintf(ctx->res->arena, "%d", ctx->reading_time);
+    char *created_at_str = arena_sprintf(ctx->res->arena, "%d", ctx->created_at);
+    char *updated_at_str = arena_sprintf(ctx->res->arena, "%d", ctx->updated_at);
+    char *is_hidden_str = arena_sprintf(ctx->res->arena, "%s", ctx->is_hidden ? "true" : "false");
 
     const char *insert_params[8] = {
         ctx->header,
@@ -244,7 +244,7 @@ static void on_post_created(PGquery *pg, PGresult *result, void *data)
     }
 
     size_t sql_len = 256 + (ctx->category_count * 32);
-    ctx->batch_sql = ecewo_alloc(ctx->res, sql_len);
+    ctx->batch_sql = arena_alloc(ctx->res->arena, sql_len);
 
     if (!ctx->batch_sql)
     {
@@ -261,7 +261,7 @@ static void on_post_created(PGquery *pg, PGresult *result, void *data)
             strcat(ctx->batch_sql, ", ");
         }
 
-        char *temp_values = ecewo_sprintf(ctx->res, "(%d, %d)", post_id, ctx->category_ids[i]);
+        char *temp_values = arena_sprintf(ctx->res->arena, "(%d, %d)", post_id, ctx->category_ids[i]);
         strcat(ctx->batch_sql, temp_values);
     }
     strcat(ctx->batch_sql, " ON CONFLICT DO NOTHING;");

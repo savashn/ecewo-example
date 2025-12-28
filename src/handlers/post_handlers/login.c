@@ -1,6 +1,6 @@
 #include <sodium.h>
 #include "handlers.h"
-#include "ecewo/session.h"
+#include "ecewo-session.h"
 #include <stdio.h>
 
 typedef struct
@@ -45,7 +45,7 @@ void login(Req *req, Res *res)
     }
 
     // Allocate login context
-    ctx_t *ctx = ecewo_alloc(res, sizeof(ctx_t));
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         cJSON_Delete(json);
@@ -61,8 +61,8 @@ void login(Req *req, Res *res)
         return;
     }
 
-    ctx->username = ecewo_strdup(res, juser->valuestring);
-    ctx->password = ecewo_strdup(res, jpass->valuestring);
+    ctx->username = arena_strdup(res->arena, juser->valuestring);
+    ctx->password = arena_strdup(res->arena, jpass->valuestring);
     cJSON_Delete(json);
 
     // Create PostgreSQL async context
@@ -116,9 +116,9 @@ static void on_user_found(PGquery *pg, PGresult *result, void *data)
     }
 
     // Extract user data
-    ctx->user_id = ecewo_strdup(ctx->res, PQgetvalue(result, 0, 0));
-    ctx->name = ecewo_strdup(ctx->res, PQgetvalue(result, 0, 1));
-    ctx->hashed_password = ecewo_strdup(ctx->res, PQgetvalue(result, 0, 2));
+    ctx->user_id = arena_strdup(ctx->res->arena, PQgetvalue(result, 0, 0));
+    ctx->name = arena_strdup(ctx->res->arena, PQgetvalue(result, 0, 1));
+    ctx->hashed_password = arena_strdup(ctx->res->arena, PQgetvalue(result, 0, 2));
 
     // Verify password
     if (sodium_init() < 0)

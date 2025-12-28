@@ -3,19 +3,19 @@
 #include <string.h>
 #include <stdio.h>
 #include "middlewares.h"
-#include "ecewo/session.h"
+#include "ecewo-session.h"
 #include "cJSON.h"
 #include "context.h"
 
-int body_checker(Req *req, Res *res, Chain *chain)
+void body_checker(Req *req, Res *res, Next next)
 {
     if (!req->body)
     {
         send_text(res, 400, "Missing request body");
-        return 0;
+        return;
     }
 
-    return next(req, res, chain);
+    next(req, res);
 }
 
 static bool string_to_bool(const char *str)
@@ -25,7 +25,7 @@ static bool string_to_bool(const char *str)
     return (strcmp(str, "true") == 0 || strcmp(str, "1") == 0);
 }
 
-int is_auth(Req *req, Res *res, Chain *chain)
+void is_auth(Req *req, Res *res, Next next)
 {
     Session *session = session_get(req);
 
@@ -33,7 +33,7 @@ int is_auth(Req *req, Res *res, Chain *chain)
     if (!ctx)
     {
         send_text(res, 500, "Internal Server Error");
-        return 0;
+        return;
     }
 
     if (session)
@@ -51,13 +51,13 @@ int is_auth(Req *req, Res *res, Chain *chain)
             free(is_admin_str);
 
             send_text(res, 500, "Error: Incomplete session data");
-            return 0;
+            return;
         }
 
         // Copy to arena BEFORE freeing
-        ctx->id = ecewo_strdup(req, id);
-        ctx->name = ecewo_strdup(req, name);
-        ctx->username = ecewo_strdup(req, username);
+        ctx->id = arena_strdup(req->arena, id);
+        ctx->name = arena_strdup(req->arena, name);
+        ctx->username = arena_strdup(req->arena, username);
         ctx->is_admin = string_to_bool(is_admin_str);
 
         // Initialize - will be set by is_authors_self
@@ -73,7 +73,7 @@ int is_auth(Req *req, Res *res, Chain *chain)
         if (!ctx->id || !ctx->name || !ctx->username)
         {
             send_text(res, 500, "Memory allocation failed");
-            return 0;
+            return;
         }
 
         printf("[is_auth] Session found - username: %s\n", ctx->username);
@@ -89,18 +89,18 @@ int is_auth(Req *req, Res *res, Chain *chain)
         ctx->is_author = false;
     }
 
-    set_context(req, "auth_ctx", ctx, sizeof(auth_context_t));
-    return next(req, res, chain);
+    set_context(req, "auth_ctx", ctx);
+    next(req, res);
 }
 
-int is_authors_self(Req *req, Res *res, Chain *chain)
+void is_authors_self(Req *req, Res *res, Next next)
 {
     auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
     if (!auth_ctx)
     {
         send_text(res, 500, "Auth context not found");
-        return 0;
+        return;
     }
 
     // Get user slug from URL parameter
@@ -108,17 +108,17 @@ int is_authors_self(Req *req, Res *res, Chain *chain)
     if (!user_slug_param)
     {
         send_text(res, 400, "User parameter missing in URL");
-        return 0;
+        return;
     }
 
     printf("[is_authors_self] URL user param: %s\n", user_slug_param);
 
     // Store the URL user slug in context
-    auth_ctx->user_slug = ecewo_strdup(req, user_slug_param);
+    auth_ctx->user_slug = arena_strdup(req->arena, user_slug_param);
     if (!auth_ctx->user_slug)
     {
         send_text(res, 500, "Memory allocation failed");
-        return 0;
+        return;
     }
 
     // Check if logged-in user matches the URL user
@@ -144,18 +144,18 @@ int is_authors_self(Req *req, Res *res, Chain *chain)
         printf("[is_authors_self] Guest user viewing: %s\n", auth_ctx->user_slug);
     }
 
-    return next(req, res, chain);
+    next(req, res);
 }
 
-int auth_only(Req *req, Res *res, Chain *chain)
+void auth_only(Req *req, Res *res, Next next)
 {
     auth_context_t *ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
     if (!ctx || !ctx->id || !ctx->name || !ctx->username)
     {
         send_text(res, 401, "Not allowed");
-        return 0;
+        return;
     }
 
-    return next(req, res, chain);
+    next(req, res);
 }
