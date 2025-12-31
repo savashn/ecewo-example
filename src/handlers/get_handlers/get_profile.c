@@ -29,7 +29,7 @@ void get_profile(Req *req, Res *res)
 
     ctx->is_author = auth_ctx->is_author;
 
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
     if (!pg)
     {
         printf("get_all_posts: Failed to create async context\n");

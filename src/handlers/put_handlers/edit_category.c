@@ -100,7 +100,7 @@ void edit_category(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");

@@ -38,7 +38,7 @@ void get_posts_by_cat(Req *req, Res *res)
 
     ctx->is_author = auth_ctx->is_author;
 
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");

@@ -64,8 +64,8 @@ void create_post(Req *req, Res *res)
 
     int reading_time = compute_reading_time(content);
 
-    // Allocate async context in the async arena
-    ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
+    // Allocate async context in the response arena
+    ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
         free(slug);
@@ -75,14 +75,6 @@ void create_post(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        free(slug);
-        cJSON_Delete(json);
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->header = arena_strdup(res->arena, header);
     ctx->content = arena_strdup(res->arena, content);
     ctx->slug = arena_strdup(res->arena, slug);
@@ -138,7 +130,7 @@ void create_post(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -239,7 +231,7 @@ static void on_post_created(PGquery *pg, PGresult *result, void *data)
 
     if (ctx->category_count == 0)
     {
-        send_text(ctx->res, 201, "Post created successfully");
+        // No categories - let completion callback handle success response
         return;
     }
 

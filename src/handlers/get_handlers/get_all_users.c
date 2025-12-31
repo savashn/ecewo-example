@@ -30,7 +30,7 @@ void get_all_users_async(Req *req, Res *res)
     }
 
     // Create async PostgreSQL context
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
     if (!pg)
     {
         printf("get_all_users_async: Failed to create pg_async context\n");

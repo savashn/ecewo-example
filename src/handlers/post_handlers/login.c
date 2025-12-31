@@ -66,7 +66,7 @@ void login(Req *req, Res *res)
     cJSON_Delete(json);
 
     // Create PostgreSQL async context
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
 
     if (!pg)
     {

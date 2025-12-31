@@ -74,7 +74,7 @@ void create_category(Req *req, Res *res)
         return;
     }
 
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");

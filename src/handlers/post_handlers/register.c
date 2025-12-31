@@ -104,7 +104,7 @@ void add_user(Req *req, Res *res)
     cJSON_Delete(json);
 
     // Create async PostgreSQL context
-    PGquery *pg = query_create(db, ctx);
+    PGquery *pg = query_create(db, res->arena);
     if (!pg)
     {
         send_text(res, 500, "Failed to create async DB context");
