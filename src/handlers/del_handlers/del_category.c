@@ -35,7 +35,7 @@ void del_category(Req *req, Res *res)
         return;
     }
 
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -49,7 +49,7 @@ void del_category(Req *req, Res *res)
 
     const char *params[] = {auth_ctx->id, cat_slug};
 
-    int qr = query_queue(pg, delete_sql, 2, params, on_cat_deleted, ctx);
+    int qr = pg_query_queue(pg, delete_sql, 2, params, on_cat_deleted, ctx);
     if (qr != 0)
     {
         printf("ERROR: Failed to queue delete, result=%d\n", qr);
@@ -57,7 +57,7 @@ void del_category(Req *req, Res *res)
         return;
     }
 
-    if (query_execute(pg) != 0)
+    if (pg_query_exec(pg) != 0)
     {
         printf("ERROR: Failed to execute delete\n");
         send_text(res, 500, "Failed to execute delete");

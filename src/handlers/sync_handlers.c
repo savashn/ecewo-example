@@ -17,39 +17,49 @@ void hello_world(Req *req, Res *res)
 
 void get_all_users(Req *req, Res *res)
 {
+    PGpool *pool = db_get_pool();
+    if (!pool) {
+        send_text(res, 500, "Database pool unavailable");
+        return;
+    }
+    
+    PGconn *conn = pg_pool_borrow(pool);
+    if (!conn) {
+        send_text(res, 500, "Failed to acquire database connection");
+        return;
+    }
+    
     const char *sql = "SELECT id, name, username FROM users;";
-
-    PGresult *resPQ = PQexec(db, sql);
-    if (PQresultStatus(resPQ) != PGRES_TUPLES_OK)
-    {
-        fprintf(stderr, "DB select failed: %s", PQerrorMessage(db));
-        PQclear(resPQ);
+    PGresult *result = PQexec(conn, sql);
+    
+    if (PQresultStatus(result) != PGRES_TUPLES_OK) {
+        fprintf(stderr, "DB select failed: %s", PQerrorMessage(conn));
+        PQclear(result);
+        pg_pool_return(pool, conn);
         send_text(res, 500, "DB select failed");
         return;
     }
-
-    int rows = PQntuples(resPQ);
+    
+    int rows = PQntuples(result);
     cJSON *json_array = cJSON_CreateArray();
-
-    for (int i = 0; i < rows; i++)
-    {
-        int id = atoi(PQgetvalue(resPQ, i, 0));
-        const char *name = PQgetvalue(resPQ, i, 1);
-        const char *username = PQgetvalue(resPQ, i, 2);
-
+    
+    for (int i = 0; i < rows; i++) {
+        int id = atoi(PQgetvalue(result, i, 0));
+        const char *name = PQgetvalue(result, i, 1);
+        const char *username = PQgetvalue(result, i, 2);
+        
         cJSON *user_json = cJSON_CreateObject();
         cJSON_AddNumberToObject(user_json, "id", id);
         cJSON_AddStringToObject(user_json, "name", name);
         cJSON_AddStringToObject(user_json, "username", username);
-
         cJSON_AddItemToArray(json_array, user_json);
     }
-
-    PQclear(resPQ);
-
+    
+    PQclear(result);
+    pg_pool_return(pool, conn);
+    
     char *json_string = cJSON_PrintUnformatted(json_array);
     send_json(res, 200, json_string);
-
     cJSON_Delete(json_array);
     free(json_string);
 }

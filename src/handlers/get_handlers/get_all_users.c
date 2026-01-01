@@ -1,5 +1,6 @@
 #include "handlers.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 // Callback structure to hold request/response context
 typedef struct
@@ -30,7 +31,7 @@ void get_all_users_async(Req *req, Res *res)
     }
 
     // Create async PostgreSQL context
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         printf("get_all_users_async: Failed to create pg_async context\n");
@@ -39,7 +40,7 @@ void get_all_users_async(Req *req, Res *res)
     }
 
     // Queue the query
-    int result = query_queue(pg, sql, 0, NULL, users_result_callback, ctx);
+    int result = pg_query_queue(pg, sql, 0, NULL, users_result_callback, ctx);
     if (result != 0)
     {
         printf("get_all_users_async: Failed to queue query\n");
@@ -48,7 +49,7 @@ void get_all_users_async(Req *req, Res *res)
     }
 
     // Start execution (this will return immediately)
-    result = query_execute(pg);
+    result = pg_query_exec(pg);
     if (result != 0)
     {
         printf("get_all_users_async: Failed to execute query\n");

@@ -4,8 +4,7 @@
 #include "ecewo.h"
 #include "cJSON.h"
 #include "ecewo-postgres.h"
-#include "db.h" // extern PGconn *db;
-#include "connection.h"
+#include "db.h" // db_get_pool();
 #include "utils.h"
 
 void hello_world(Req *req, Res *res);

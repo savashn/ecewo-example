@@ -1,6 +1,7 @@
 #include "handlers.h"
 #include "context.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct
 {
@@ -32,7 +33,7 @@ void get_all_posts(Req *req, Res *res)
     ctx->is_author = auth_ctx->is_author;
 
     // Create async PostgreSQL context
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         printf("get_all_posts: Failed to create async context\n");
@@ -79,8 +80,8 @@ void get_all_posts(Req *req, Res *res)
     const char *params[] = {auth_ctx->user_slug};
 
     // Queue the query and execute
-    if (query_queue(pg, sql, 1, params, posts_result_callback, ctx) != 0 ||
-        query_execute(pg) != 0)
+    if (pg_query_queue(pg, sql, 1, params, posts_result_callback, ctx) != 0 ||
+        pg_query_exec(pg) != 0)
     {
         send_text(res, 500, "Failed to queue or execute query");
         return;

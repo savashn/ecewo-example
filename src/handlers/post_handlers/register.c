@@ -104,7 +104,7 @@ void add_user(Req *req, Res *res)
     cJSON_Delete(json);
 
     // Create async PostgreSQL context
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Failed to create async DB context");
@@ -121,14 +121,14 @@ void add_user(Req *req, Res *res)
         ctx->email};
 
     // Queue the async check query
-    if (query_queue(pg, check_sql, 2, check_params, check_user_exists, ctx) != 0)
+    if (pg_query_queue(pg, check_sql, 2, check_params, check_user_exists, ctx) != 0)
     {
         send_text(res, 500, "Failed to queue database query");
         return;
     }
 
     // Start execution - this will return immediately and execute asynchronously
-    if (query_execute(pg) != 0)
+    if (pg_query_exec(pg) != 0)
     {
         send_text(res, 500, "Failed to execute database query");
         return;
@@ -181,7 +181,7 @@ static void check_user_exists(PGquery *pg, PGresult *result, void *data)
         ctx->about};
 
     // Queue the async insert query using the same pg context
-    if (query_queue(pg, insert_sql, 5, insert_params, add_user_result, ctx) != 0)
+    if (pg_query_queue(pg, insert_sql, 5, insert_params, add_user_result, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue insert query");
         return;

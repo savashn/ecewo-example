@@ -30,7 +30,6 @@ FetchContent_MakeAvailable(ecewo)
 add_executable(server
     src/main.c
     src/db/db.c
-    src/db/connection.c
     src/handlers/sync_handlers.c
     src/handlers/post_handlers/login.c
     src/handlers/post_handlers/register.c

@@ -1,11 +1,10 @@
 #ifndef DB_H
 #define DB_H
 
-#include <libpq-fe.h>
+#include "ecewo-postgres.h"
 
-extern PGconn *db;
-
-int init_db(void);
-void close_db(void);
+int db_init(void);
+void db_cleanup(void);
+PGpool *db_get_pool(void);
 
 #endif

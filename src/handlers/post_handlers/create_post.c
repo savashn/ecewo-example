@@ -1,11 +1,11 @@
 #include "handlers.h"
 #include "db.h"
-#include "connection.h"
 #include "context.h"
 #include "utils.h"
 #include "slugify.h"
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct
 {
@@ -130,7 +130,7 @@ void create_post(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -140,7 +140,7 @@ void create_post(Req *req, Res *res)
     const char *select_sql = "SELECT 1 FROM posts WHERE slug = $1";
     const char *params[] = {ctx->slug};
 
-    int query_result = query_queue(pg, select_sql, 1, params, on_query_post, ctx);
+    int query_result = pg_query_queue(pg, select_sql, 1, params, on_query_post, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
@@ -148,7 +148,7 @@ void create_post(Req *req, Res *res)
         return;
     }
 
-    int exec_result = query_execute(pg);
+    int exec_result = pg_query_exec(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
@@ -207,7 +207,7 @@ static void on_query_post(PGquery *pg, PGresult *result, void *data)
         "VALUES ($1, $2, $3, $4, $5, to_timestamp($6), to_timestamp($7), $8) "
         "RETURNING id; ";
 
-    if (query_queue(pg, insert_sql, 8, insert_params, on_post_created, ctx) != 0)
+    if (pg_query_queue(pg, insert_sql, 8, insert_params, on_post_created, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue insert query");
         return;
@@ -260,7 +260,7 @@ static void on_post_created(PGquery *pg, PGresult *result, void *data)
 
     printf("on_post_created: Executing batch SQL: %s\n", ctx->batch_sql);
 
-    if (query_queue(pg, ctx->batch_sql, 0, NULL, insert_post_result, ctx) != 0)
+    if (pg_query_queue(pg, ctx->batch_sql, 0, NULL, insert_post_result, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue batch category insert");
         return;

@@ -66,7 +66,7 @@ void login(Req *req, Res *res)
     cJSON_Delete(json);
 
     // Create PostgreSQL async context
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
 
     if (!pg)
     {
@@ -79,7 +79,7 @@ void login(Req *req, Res *res)
     const char *select_sql = "SELECT id, name, password FROM users WHERE username = $1";
     const char *params[] = {ctx->username};
 
-    int query_result = query_queue(pg, select_sql, 1, params, on_user_found, ctx);
+    int query_result = pg_query_queue(pg, select_sql, 1, params, on_user_found, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
@@ -88,7 +88,7 @@ void login(Req *req, Res *res)
     }
 
     // Start execution
-    int exec_result = query_execute(pg);
+    int exec_result = pg_query_exec(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);

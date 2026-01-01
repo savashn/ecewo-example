@@ -1,11 +1,11 @@
 #include "handlers.h"
 #include "db.h"
-#include "connection.h"
 #include "context.h"
 #include "utils.h"
 #include "slugify.h"
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct
 {
@@ -159,7 +159,7 @@ void edit_post(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -170,7 +170,7 @@ void edit_post(Req *req, Res *res)
     const char *select_sql = "SELECT id, author_id FROM posts WHERE slug = $1";
     const char *params[] = {ctx->original_slug};
 
-    int query_result = query_queue(pg, select_sql, 1, params, on_query_post_exists, ctx);
+    int query_result = pg_query_queue(pg, select_sql, 1, params, on_query_post_exists, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
@@ -178,7 +178,7 @@ void edit_post(Req *req, Res *res)
         return;
     }
 
-    int exec_result = query_execute(pg);
+    int exec_result = pg_query_exec(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
@@ -228,7 +228,7 @@ static void on_query_post_exists(PGquery *pg, PGresult *result, void *data)
         const char *check_slug_sql = "SELECT 1 FROM posts WHERE slug = $1 AND slug != $2";
         const char *check_params[] = {ctx->new_slug, ctx->original_slug};
 
-        if (query_queue(pg, check_slug_sql, 2, check_params, on_check_new_slug, ctx) != 0)
+        if (pg_query_queue(pg, check_slug_sql, 2, check_params, on_check_new_slug, ctx) != 0)
         {
             send_text(ctx->res, 500, "Failed to queue slug check query");
             return;
@@ -302,7 +302,7 @@ static void update_post(PGquery *pg, ctx_t *ctx)
         "WHERE slug = $7 "
         "RETURNING id;";
 
-    if (query_queue(pg, update_sql, 7, update_params, on_post_updated, ctx) != 0)
+    if (pg_query_queue(pg, update_sql, 7, update_params, on_post_updated, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue update query");
         return;
@@ -354,7 +354,7 @@ static void clear_post_categories(PGquery *pg, ctx_t *ctx, const char *post_id)
     const char *delete_sql = "DELETE FROM post_categories WHERE post_id = $1";
     const char *delete_params[] = {post_id};
 
-    if (query_queue(pg, delete_sql, 1, delete_params, on_categories_cleared, ctx) != 0)
+    if (pg_query_queue(pg, delete_sql, 1, delete_params, on_categories_cleared, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue category deletion");
         return;
@@ -373,7 +373,7 @@ static void update_post_categories(PGquery *pg, ctx_t *ctx, const char *post_id)
         return;
     }
 
-    if (query_queue(pg, delete_sql, 1, delete_params, on_old_categories_deleted, ctx) != 0)
+    if (pg_query_queue(pg, delete_sql, 1, delete_params, on_old_categories_deleted, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue category deletion");
         return;
@@ -456,7 +456,7 @@ static void insert_new_categories(PGquery *pg, ctx_t *ctx)
         strcat(ctx->batch_sql, value_part);
     }
 
-    if (query_queue(pg, ctx->batch_sql, ctx->category_count * 2,
+    if (pg_query_queue(pg, ctx->batch_sql, ctx->category_count * 2,
                     (const char **)ctx->batch_params,
                     on_categories_inserted, ctx) != 0)
     {

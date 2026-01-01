@@ -1,6 +1,7 @@
 #include "handlers.h"
 #include "context.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct
 {
@@ -47,7 +48,7 @@ void get_post(Req *req, Res *res)
     ctx->post_slug = post_slug;
     ctx->is_author = auth_ctx->is_author;
 
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -87,14 +88,14 @@ void get_post(Req *req, Res *res)
 
     const char *params[] = {ctx->username, ctx->post_slug};
     
-    int qr = query_queue(pg, select_sql, 2, params, on_query_posts, ctx);
+    int qr = pg_query_queue(pg, select_sql, 2, params, on_query_posts, ctx);
     if (qr != 0)
     {
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = query_execute(pg);
+    int exec_result = pg_query_exec(pg);
     if (exec_result != 0)
     {
         send_text(res, 500, "Failed to execute query");

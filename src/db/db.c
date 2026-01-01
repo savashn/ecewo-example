@@ -1,23 +1,20 @@
-#include "db.h"
-#include "connection.h"
+#include "ecewo-postgres.h"
+#include "dotenv.h"
+#include <stdlib.h> // for getenv
 
-PGconn *db = NULL;
-
-static int exec_sql(const char *sql)
-{
-    PGresult *res = PQexec(db, sql);
-    if (PQresultStatus(res) != PGRES_COMMAND_OK)
-    {
-        fprintf(stderr, "SQL failed: %s\n", PQresultErrorMessage(res));
-        PQclear(res);
-        return 1;
-    }
-    PQclear(res);
-    return 0;
-}
+static PGpool *db_pool = NULL;
 
 static int create_tables(void)
 {
+    // This fn is gonna run sync because
+    // I dont want server to start
+    // before all the tables created
+    PGconn *conn = pg_pool_borrow(db_pool);
+    if (!conn) {
+        fprintf(stderr, "Failed to acquire connection\n");
+        return -1;
+    }
+
     const char *queries[] = {
         "CREATE TABLE IF NOT EXISTS users ("
         "  id SERIAL PRIMARY KEY, "
@@ -56,55 +53,57 @@ static int create_tables(void)
     };
 
     size_t count = sizeof(queries) / sizeof(queries[0]);
-    for (size_t i = 0; i < count; ++i)
-    {
-        if (exec_sql(queries[i]) != 0)
-        {
-            fprintf(stderr, "Query %zu failed.\n", i + 1);
-            return 1;
+    
+    for (size_t i = 0; i < count; ++i) {
+        PGresult *result = PQexec(conn, queries[i]);
+        ExecStatusType status = PQresultStatus(result);
+        
+        if (status != PGRES_COMMAND_OK) {
+            fprintf(stderr, "Table creation failed: %s\n", PQerrorMessage(conn));
+            PQclear(result);
+            pg_pool_return(db_pool, conn);
+            return -1;
         }
+        
+        PQclear(result);
     }
 
-    printf("Tables and extensions created or already exist.\n");
+    pg_pool_return(db_pool, conn);
+    printf("All tables created or they already exist.\n");
     return 0;
 }
 
-int init_db(void)
+int db_init(void)
 {
-    const char *conninfo = build_connection_string();
+    PGPoolConfig config = {
+        .host = getenv("DB_HOST"),
+        .port = getenv("DB_PORT"),
+        .dbname = getenv("DB_NAME"),
+        .user = getenv("DB_USER"),
+        .password = getenv("DB_PASSWORD"),
+        .pool_size = 10,
+        .acquire_timeout_ms = 5000
+    };
+    
+    db_pool = pg_pool_create(&config);
 
-    db = PQconnectdb(conninfo);
-    if (PQstatus(db) != CONNECTION_OK)
-    {
-        fprintf(stderr, "Connection to database failed: %s\n", PQerrorMessage(db));
-        PQfinish(db);
-        return 1;
+    if (create_tables() != 0) {
+        fprintf(stderr, "Tables couln't be created\n");
+        return -1;
     }
-    printf("Database connection successful.\n");
-
-    if (PQsetnonblocking(db, 1) != 0)
-    { // for non-blocking async I/O
-        fprintf(stderr, "Failed to set async connection to nonblocking mode\n");
-        PQfinish(db);
-        return 1;
-    }
-
-    printf("Async database connection successful.\n");
-
-    if (create_tables() != 0)
-    {
-        printf("Tables cannot be created\n");
-        return 1;
-    }
-
+    
     return 0;
 }
 
-void close_db(void)
+PGpool *db_get_pool(void)
 {
-    if (db)
-    {
-        PQfinish(db);
-        db = NULL;
+    return db_pool;
+}
+
+void db_cleanup(void)
+{
+    if (db_pool) {
+        pg_pool_destroy(db_pool);
+        db_pool = NULL;
     }
 }

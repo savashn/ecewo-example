@@ -18,7 +18,7 @@ static const Cors cors = {
 
 void destroy_app(void)
 {
-    close_db();
+    db_cleanup();
     session_cleanup();
 }
 
@@ -49,7 +49,7 @@ int main(void)
     helmet_init(NULL);
     session_init();
 
-    if (init_db() != 0)
+    if (db_init() != 0)
     {
         fprintf(stderr, "Database initialization failed.\n");
         return 1;

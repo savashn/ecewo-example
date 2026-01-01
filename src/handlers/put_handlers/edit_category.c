@@ -1,11 +1,11 @@
 #include "handlers.h"
 #include "db.h"
-#include "connection.h"
 #include "context.h"
 #include "utils.h"
 #include "slugify.h"
 #include <time.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 typedef struct
 {
@@ -100,7 +100,7 @@ void edit_category(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = query_create(db, res->arena);
+    PGquery *pg = pg_query(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -110,7 +110,7 @@ void edit_category(Req *req, Res *res)
     const char *select_sql = "SELECT id, author_id FROM categories WHERE slug = $1";
     const char *params[] = {ctx->original_slug};
 
-    int query_result = query_queue(pg, select_sql, 1, params, on_query_category, ctx);
+    int query_result = pg_query_queue(pg, select_sql, 1, params, on_query_category, ctx);
     if (query_result != 0)
     {
         printf("ERROR: Failed to queue query, result=%d\n", query_result);
@@ -118,7 +118,7 @@ void edit_category(Req *req, Res *res)
         return;
     }
 
-    int exec_result = query_execute(pg);
+    int exec_result = pg_query_exec(pg);
     if (exec_result != 0)
     {
         printf("ERROR: Failed to execute, result=%d\n", exec_result);
@@ -158,7 +158,7 @@ static void on_query_category(PGquery *pg, PGresult *result, void *data)
         const char *check_slug_sql = "SELECT 1 FROM categories WHERE slug = $1 AND slug != $2";
         const char *check_params[] = {ctx->new_slug, ctx->original_slug};
 
-        if (query_queue(pg, check_slug_sql, 2, check_params, on_check_new_slug, ctx) != 0)
+        if (pg_query_queue(pg, check_slug_sql, 2, check_params, on_check_new_slug, ctx) != 0)
         {
             send_text(ctx->res, 500, "Failed to queue slug check query");
             return;
@@ -215,7 +215,7 @@ static void update_category(PGquery *pg, ctx_t *ctx)
         "WHERE slug = $3 "
         "RETURNING id;";
 
-    if (query_queue(pg, update_sql, 3, update_params, on_category_updated, ctx) != 0)
+    if (pg_query_queue(pg, update_sql, 3, update_params, on_category_updated, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue update query");
         return;
