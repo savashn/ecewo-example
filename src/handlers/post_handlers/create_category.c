@@ -42,7 +42,6 @@ void create_category(Req *req, Res *res)
 
     char *slug = slugify(category, NULL);
 
-    // Allocate async context in the async arena
     ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
@@ -53,14 +52,6 @@ void create_category(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        free(slug);
-        cJSON_Delete(json);
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->category = arena_strdup(ctx->res->arena, category);
     ctx->slug = arena_strdup(ctx->res->arena, slug);
     ctx->author_id = arena_strdup(ctx->res->arena, author_id);
@@ -74,7 +65,7 @@ void create_category(Req *req, Res *res)
         return;
     }
 
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -90,35 +81,22 @@ void create_category(Req *req, Res *res)
 
     const char *params[] = {ctx->category, ctx->slug, ctx->author_id};
 
-    int query_result = pg_query_queue(pg, conditional_insert_sql, 3, params, on_category_insert, ctx);
-    if (query_result != 0)
+    if (pg_query_queue(pg, conditional_insert_sql, 3, params, on_category_insert, ctx) != 0)
     {
-        printf("ERROR: Failed to queue query, result=%d\n", query_result);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pg_query_exec(pg);
-    if (exec_result != 0)
+    if (pg_query_exec(pg) != 0)
     {
-        printf("ERROR: Failed to execute, result=%d\n", exec_result);
         send_text(res, 500, "Failed to execute query");
         return;
     }
-
-    printf("create_category: Conditional INSERT query started\n");
 }
 
 static void on_category_insert(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        printf("ERROR: Result is NULL\n");
-        send_text(ctx->res, 500, "Database error");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -129,26 +107,19 @@ static void on_category_insert(PGquery *pg, PGresult *result, void *data)
         return;
     }
 
-    // Check how many rows were affected
     char *affected_rows = PQcmdTuples(result);
     int rows_inserted = atoi(affected_rows);
 
     if (rows_inserted == 0)
     {
-        // No rows inserted = category already exists
-        printf("on_category_insert: Category '%s' already exists\n", ctx->category);
         send_text(ctx->res, 409, "This category already exists");
     }
     else if (rows_inserted == 1)
     {
-        // One row inserted = success
-        printf("on_category_insert: Category '%s' created successfully\n", ctx->category);
         send_text(ctx->res, 201, "Category created!");
     }
     else
     {
-        // Unexpected result
-        printf("on_category_insert: Unexpected result: %d rows affected\n", rows_inserted);
         send_text(ctx->res, 500, "Unexpected database result");
     }
 }

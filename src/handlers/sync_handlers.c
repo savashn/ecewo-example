@@ -1,9 +1,10 @@
 #include "handlers.h"
-#include "db.h" // extern PGconn *db;
+#include "db.h"
 #include "ecewo-session.h"
 #include "context.h"
 #include "slugify.h"
 #include <stdio.h>
+#include <stdlib.h>
 
 void hello_world(Req *req, Res *res)
 {

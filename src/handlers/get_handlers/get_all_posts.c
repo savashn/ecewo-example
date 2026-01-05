@@ -15,7 +15,6 @@ void get_all_posts(Req *req, Res *res)
 {
     auth_context_t *auth_ctx = (auth_context_t *)get_context(req, "auth_ctx");
 
-    // Create context to pass to callback
     ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
@@ -24,24 +23,16 @@ void get_all_posts(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->is_author = auth_ctx->is_author;
 
-    // Create async PostgreSQL context
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
-        printf("get_all_posts: Failed to create async context\n");
         send_text(res, 500, "Failed to create async context");
         return;
     }
 
-    char *sql;
+    const char *sql;
 
     if (auth_ctx->is_author)
     {
@@ -79,7 +70,6 @@ void get_all_posts(Req *req, Res *res)
 
     const char *params[] = {auth_ctx->user_slug};
 
-    // Queue the query and execute
     if (pg_query_queue(pg, sql, 1, params, posts_result_callback, ctx) != 0 ||
         pg_query_exec(pg) != 0)
     {
@@ -90,7 +80,6 @@ void get_all_posts(Req *req, Res *res)
     // Function returns here, callback will be called when query completes
 }
 
-// Callback function that processes the query result
 static void posts_result_callback(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
@@ -110,13 +99,11 @@ static void posts_result_callback(PGquery *pg, PGresult *result, void *data)
         bool hidden = (PQgetvalue(result, i, PQfnumber(result, "is_hidden"))[0] == 't');
         if (!ctx->is_author && hidden)
         {
-            // If not author and post is hidden, skip that post
             continue;
         }
 
         cJSON *obj = cJSON_CreateObject();
 
-        // Add string fields
         cJSON_AddStringToObject(obj, "header", PQgetvalue(result, i, PQfnumber(result, "header")));
         cJSON_AddStringToObject(obj, "slug", PQgetvalue(result, i, PQfnumber(result, "slug")));
         cJSON_AddStringToObject(obj, "content", PQgetvalue(result, i, PQfnumber(result, "content")));
@@ -124,11 +111,9 @@ static void posts_result_callback(PGquery *pg, PGresult *result, void *data)
         cJSON_AddStringToObject(obj, "created_at", PQgetvalue(result, i, PQfnumber(result, "created_at")));
         cJSON_AddStringToObject(obj, "updated_at", PQgetvalue(result, i, PQfnumber(result, "updated_at")));
 
-        // Add integer fields
         cJSON_AddNumberToObject(obj, "reading_time", atoi(PQgetvalue(result, i, PQfnumber(result, "reading_time"))));
         cJSON_AddNumberToObject(obj, "author_id", atoi(PQgetvalue(result, i, PQfnumber(result, "author_id"))));
 
-        // Add boolean field
         cJSON_AddBoolToObject(obj, "is_hidden", strcmp(PQgetvalue(result, i, PQfnumber(result, "is_hidden")), "t") == 0);
 
         char *categories_str = PQgetvalue(result, i, PQfnumber(result, "categories"));

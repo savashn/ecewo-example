@@ -16,14 +16,13 @@ typedef struct
     char *new_slug;
     int reading_time;
     char *author_id;
-    int created_at;
     int updated_at;
     bool is_hidden;
     int *category_ids;
     int category_count;
-    int completed_categories;
     char *batch_sql;
     char **batch_params;
+    char *post_id;
 } ctx_t;
 
 static void on_query_post_exists(PGquery *pg, PGresult *result, void *data);
@@ -86,7 +85,6 @@ void edit_post(Req *req, Res *res)
 
     int reading_time = compute_reading_time(content);
 
-    // Create context to hold all the data for async operation
     ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
@@ -97,14 +95,6 @@ void edit_post(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        cJSON_Delete(json);
-        free(new_slug);
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->header = arena_strdup(res->arena, header);
     ctx->content = arena_strdup(res->arena, content);
     ctx->original_slug = arena_strdup(res->arena, slug);
@@ -126,7 +116,6 @@ void edit_post(Req *req, Res *res)
     ctx->category_ids = NULL;
     ctx->category_count = 0;
 
-    // Process categories
     const cJSON *jcategories = cJSON_GetObjectItem(json, "categories");
     if (jcategories && cJSON_IsArray(jcategories))
     {
@@ -159,29 +148,24 @@ void edit_post(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
         return;
     }
 
-    // First, check if the post exists and the user has it
     const char *select_sql = "SELECT id, author_id FROM posts WHERE slug = $1";
     const char *params[] = {ctx->original_slug};
 
-    int query_result = pg_query_queue(pg, select_sql, 1, params, on_query_post_exists, ctx);
-    if (query_result != 0)
+    if (pg_query_queue(pg, select_sql, 1, params, on_query_post_exists, ctx) != 0)
     {
-        printf("ERROR: Failed to queue query, result=%d\n", query_result);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pg_query_exec(pg);
-    if (exec_result != 0)
+    if (pg_query_exec(pg) != 0)
     {
-        printf("ERROR: Failed to execute, result=%d\n", exec_result);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -190,12 +174,6 @@ void edit_post(Req *req, Res *res)
 static void on_query_post_exists(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -208,21 +186,17 @@ static void on_query_post_exists(PGquery *pg, PGresult *result, void *data)
 
     if (PQntuples(result) == 0)
     {
-        printf("on_query_post_exists: Post not found\n");
         send_text(ctx->res, 404, "Post not found");
         return;
     }
 
-    // Check if the post belongs to the user
     const char *post_author_id = PQgetvalue(result, 0, 1);
     if (strcmp(post_author_id, ctx->author_id) != 0)
     {
-        printf("on_query_post_exists: User is not the author of this post\n");
         send_text(ctx->res, 403, "You can only edit your own posts");
         return;
     }
 
-    // If slug has change, check if the new slug has been occupied
     if (strcmp(ctx->original_slug, ctx->new_slug) != 0)
     {
         const char *check_slug_sql = "SELECT 1 FROM posts WHERE slug = $1 AND slug != $2";
@@ -236,7 +210,6 @@ static void on_query_post_exists(PGquery *pg, PGresult *result, void *data)
     }
     else
     {
-        // If slug hasn't change, continue to update directly
         update_post(pg, ctx);
     }
 }
@@ -244,13 +217,6 @@ static void on_query_post_exists(PGquery *pg, PGresult *result, void *data)
 static void on_check_new_slug(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        printf("ERROR: Result is NULL\n");
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -263,7 +229,6 @@ static void on_check_new_slug(PGquery *pg, PGresult *result, void *data)
 
     if (PQntuples(result) > 0)
     {
-        printf("on_check_new_slug: New slug already exists\n");
         send_text(ctx->res, 409, "A post with this title already exists");
         return;
     }
@@ -273,7 +238,6 @@ static void on_check_new_slug(PGquery *pg, PGresult *result, void *data)
 
 static void update_post(PGquery *pg, ctx_t *ctx)
 {
-    // Prepare parameters for update
     char reading_time_str[32], updated_at_str[32];
     char is_hidden_str[8];
 
@@ -288,7 +252,7 @@ static void update_post(PGquery *pg, ctx_t *ctx)
         reading_time_str,
         updated_at_str,
         is_hidden_str,
-        ctx->original_slug // for WHERE condition
+        ctx->original_slug
     };
 
     const char *update_sql =
@@ -313,12 +277,6 @@ static void on_post_updated(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
-
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
@@ -330,21 +288,18 @@ static void on_post_updated(PGquery *pg, PGresult *result, void *data)
 
     if (PQntuples(result) == 0)
     {
-        printf("on_post_updated: No rows affected\n");
         send_text(ctx->res, 404, "Post not found or not updated");
         return;
     }
 
-    // If referenced with categories, update them
+    const char *post_id = PQgetvalue(result, 0, 0);
+
     if (ctx->category_ids && ctx->category_count > 0)
     {
-        const char *post_id = PQgetvalue(result, 0, 0);
         update_post_categories(pg, ctx, post_id);
     }
     else
     {
-        // If no categories sent, delete the existing categories and create new ones
-        const char *post_id = PQgetvalue(result, 0, 0);
         clear_post_categories(pg, ctx, post_id);
     }
 }
@@ -366,8 +321,8 @@ static void update_post_categories(PGquery *pg, ctx_t *ctx, const char *post_id)
     const char *delete_sql = "DELETE FROM post_categories WHERE post_id = $1";
     const char *delete_params[] = {post_id};
 
-    ctx->author_id = arena_strdup(ctx->res->arena, post_id);
-    if (!ctx->author_id)
+    ctx->post_id = arena_strdup(ctx->res->arena, post_id);
+    if (!ctx->post_id)
     {
         send_text(ctx->res, 500, "Memory allocation failed");
         return;
@@ -383,12 +338,6 @@ static void update_post_categories(PGquery *pg, ctx_t *ctx, const char *post_id)
 static void on_old_categories_deleted(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
     if (status != PGRES_COMMAND_OK)
@@ -435,7 +384,7 @@ static void insert_new_categories(PGquery *pg, ctx_t *ctx)
             return;
         }
 
-        ctx->batch_params[i * 2] = arena_strdup(ctx->res->arena, ctx->author_id);
+        ctx->batch_params[i * 2] = arena_strdup(ctx->res->arena, ctx->post_id);
         ctx->batch_params[i * 2 + 1] = category_str;
 
         if (!ctx->batch_params[i * 2] || !ctx->batch_params[i * 2 + 1])
@@ -474,12 +423,6 @@ static void on_categories_cleared(PGquery *pg, PGresult *result, void *data)
 static void on_categories_inserted(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
     if (status != PGRES_COMMAND_OK)

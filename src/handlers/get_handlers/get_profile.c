@@ -22,26 +22,19 @@ void get_profile(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->is_author = auth_ctx->is_author;
 
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
-        printf("get_all_posts: Failed to create async context\n");
         send_text(res, 500, "Failed to create async context");
         return;
     }
 
-    char *sql =
+    const char *sql =
         "SELECT id, name, username, email, about "
         "FROM users "
-        "WHERE username = $1; ";
+        "WHERE username = $1;";
 
     const char *params[] = {auth_ctx->user_slug};
 
@@ -57,24 +50,20 @@ static void on_result(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!result)
+    if (PQresultStatus(result) != PGRES_TUPLES_OK || PQntuples(result) == 0)
     {
-        printf("ERROR: Result is NULL\n");
         send_text(ctx->res, 500, "No results");
         return;
     }
 
     cJSON *resp = cJSON_CreateObject();
 
-    // Add integer field
     cJSON_AddNumberToObject(resp, "id", atoi(PQgetvalue(result, 0, PQfnumber(result, "id"))));
 
-    // Add string fields
     cJSON_AddStringToObject(resp, "name", PQgetvalue(result, 0, PQfnumber(result, "name")));
     cJSON_AddStringToObject(resp, "email", PQgetvalue(result, 0, PQfnumber(result, "email")));
     cJSON_AddStringToObject(resp, "about", PQgetvalue(result, 0, PQfnumber(result, "about")));
 
-    // Add boolean field
     cJSON_AddBoolToObject(resp, "is_author", ctx->is_author);
 
     char *json_str = cJSON_PrintUnformatted(resp);

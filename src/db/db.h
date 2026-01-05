@@ -3,8 +3,10 @@
 
 #include "ecewo-postgres.h"
 
+// Synchronous initialization
 int db_init(void);
-void db_cleanup(void);
+
 PGpool *db_get_pool(void);
+void db_cleanup(void);
 
 #endif

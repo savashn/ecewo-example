@@ -31,22 +31,16 @@ void get_posts_by_cat(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->is_author = auth_ctx->is_author;
 
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
         return;
     }
 
-    char *select_sql =
+    const char *select_sql =
         "SELECT p.id, p.header, p.slug, p.reading_time, "
         "       p.author_id, u.username, p.created_at, p.updated_at, p.is_hidden, "
         "       COALESCE(string_agg(c.category, ','), '') as categories, "
@@ -62,18 +56,14 @@ void get_posts_by_cat(Req *req, Res *res)
 
     const char *params[] = {auth_ctx->user_slug, category};
 
-    int qr = pg_query_queue(pg, select_sql, 2, params, on_result, ctx);
-    if (qr != 0)
+    if (pg_query_queue(pg, select_sql, 2, params, on_result, ctx) != 0)
     {
-        printf("ERROR: Failed to queue query, result=%d\n", qr);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pg_query_exec(pg);
-    if (exec_result != 0)
+    if (pg_query_exec(pg) != 0)
     {
-        printf("ERROR: Failed to execute, result=%d\n", exec_result);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -82,12 +72,6 @@ void get_posts_by_cat(Req *req, Res *res)
 void on_result(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
 
     if (PQresultStatus(result) != PGRES_TUPLES_OK)
     {
@@ -100,7 +84,6 @@ void on_result(PGquery *pg, PGresult *result, void *data)
     cJSON *root = cJSON_CreateObject();
     cJSON *posts = cJSON_CreateArray();
 
-    // If no any rows, return an empty array
     if (rows == 0)
     {
         cJSON_AddItemToObject(root, "posts", posts);
@@ -120,7 +103,6 @@ void on_result(PGquery *pg, PGresult *result, void *data)
 
         cJSON *obj = cJSON_CreateObject();
 
-        // Add string fields
         cJSON_AddStringToObject(obj, "header", PQgetvalue(result, i, PQfnumber(result, "header")));
         cJSON_AddStringToObject(obj, "slug", PQgetvalue(result, i, PQfnumber(result, "slug")));
         cJSON_AddStringToObject(obj, "username", PQgetvalue(result, i, PQfnumber(result, "username")));
@@ -130,11 +112,9 @@ void on_result(PGquery *pg, PGresult *result, void *data)
         cJSON_AddStringToObject(obj, "category_slugs", PQgetvalue(result, i, PQfnumber(result, "category_slugs")));
         cJSON_AddStringToObject(obj, "category_ids", PQgetvalue(result, i, PQfnumber(result, "category_ids")));
 
-        // Add integer fields
         cJSON_AddNumberToObject(obj, "reading_time", atoi(PQgetvalue(result, i, PQfnumber(result, "reading_time"))));
         cJSON_AddNumberToObject(obj, "author_id", atoi(PQgetvalue(result, i, PQfnumber(result, "author_id"))));
 
-        // Add boolean field
         cJSON_AddBoolToObject(obj, "is_hidden", strcmp(PQgetvalue(result, i, PQfnumber(result, "is_hidden")), "t") == 0);
 
         cJSON_AddItemToArray(posts, obj);

@@ -25,7 +25,6 @@ void login(Req *req, Res *res)
         return;
     }
 
-    // Parse JSON
     cJSON *json = cJSON_Parse(req->body);
     if (!json)
     {
@@ -38,13 +37,11 @@ void login(Req *req, Res *res)
 
     if (!juser || !jpass || !juser->valuestring || !jpass->valuestring)
     {
-        printf("ERROR: Username or password missing\n");
         cJSON_Delete(json);
         send_text(res, 400, "Username or password is missing");
         return;
     }
 
-    // Allocate login context
     ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
@@ -54,44 +51,28 @@ void login(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        cJSON_Delete(json);
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->username = arena_strdup(res->arena, juser->valuestring);
     ctx->password = arena_strdup(res->arena, jpass->valuestring);
     cJSON_Delete(json);
 
-    // Create PostgreSQL async context
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
-
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
-        printf("ERROR: Failed to create pg_async context\n");
         send_text(res, 500, "Database connection error");
         return;
     }
 
-    // Queue the SELECT query
     const char *select_sql = "SELECT id, name, password FROM users WHERE username = $1";
     const char *params[] = {ctx->username};
 
-    int query_result = pg_query_queue(pg, select_sql, 1, params, on_user_found, ctx);
-    if (query_result != 0)
+    if (pg_query_queue(pg, select_sql, 1, params, on_user_found, ctx) != 0)
     {
-        printf("ERROR: Failed to queue query, result=%d\n", query_result);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    // Start execution
-    int exec_result = pg_query_exec(pg);
-    if (exec_result != 0)
+    if (pg_query_exec(pg) != 0)
     {
-        printf("ERROR: Failed to execute, result=%d\n", exec_result);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -101,26 +82,16 @@ static void on_user_found(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!result)
-    {
-        printf("ERROR: Result is NULL\n");
-        return;
-    }
-
-    PQresultStatus(result);
-
     if (PQntuples(result) == 0)
     {
         send_text(ctx->res, 404, "User not found");
         return;
     }
 
-    // Extract user data
     ctx->user_id = arena_strdup(ctx->res->arena, PQgetvalue(result, 0, 0));
     ctx->name = arena_strdup(ctx->res->arena, PQgetvalue(result, 0, 1));
     ctx->hashed_password = arena_strdup(ctx->res->arena, PQgetvalue(result, 0, 2));
 
-    // Verify password
     if (sodium_init() < 0)
     {
         send_text(ctx->res, 500, "Crypto init failed");
@@ -143,9 +114,8 @@ static void on_user_found(PGquery *pg, PGresult *result, void *data)
     if (strstr(ctx->username, "johndoe"))
         session_value_set(sess, "is_admin", "true");
 
-    // The cookie_options must be the same in the logout handler
     Cookie cookie_options = {
-        .max_age = 3600, // 1 hour
+        .max_age = 3600,
         .path = "/",
         .same_site = "Lax",
         .http_only = true,

@@ -21,7 +21,7 @@ include(FetchContent)
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG v3.0.0
+    GIT_TAG v3.0.1
     GIT_SHALLOW TRUE
 )
 
@@ -102,6 +102,19 @@ if(WIN32 AND TARGET ecewo)
 endif()
 
 find_package(PostgreSQL REQUIRED)
+find_package(mimalloc CONFIG QUIET)
+
+if(mimalloc_FOUND)
+    message(STATUS "mimalloc found: ${mimalloc_VERSION}")
+
+    set(MI_OVERRIDE ON CACHE BOOL "" FORCE)
+
+    if(TARGET mimalloc-static)
+        target_link_libraries(server PRIVATE mimalloc-static)
+    else()
+        target_link_libraries(server PRIVATE mimalloc)
+    endif()
+endif()
 
 target_include_directories(server PRIVATE
     ${PostgreSQL_INCLUDE_DIRS}
@@ -129,6 +142,7 @@ endif()
 target_link_libraries(server PRIVATE
     ecewo
     ${PostgreSQL_LIBRARIES}
+    mimalloc-static
 )
 
 message(STATUS "=== Build Configuration ===")

@@ -9,23 +9,20 @@
 #include <stdio.h>
 
 static const Cors cors = {
-    .origin = "http://localhost:3000",        // Default "*"
-    .methods = "GET, POST, OPTIONS",          // Default "GET, POST, PUT, DELETE, OPTIONS"
-    .headers = "Content-Type, Authorization", // Default "Content-Type"
-    .credentials = "true",                    // Default "false"
-    .max_age = "86400",                       // Default "3600"
+    .origin = "http://localhost:3000",
+    .methods = "GET, POST, OPTIONS",
+    .headers = "Content-Type, Authorization",
+    .credentials = "true",
+    .max_age = "86400",
 };
 
-void destroy_app(void)
-{
-    db_cleanup();
+void destroy_app(void) {
     session_cleanup();
+    db_cleanup();
 }
 
-int main(void)
-{
-    if (server_init() != 0)
-    {
+int main(void) {
+    if (server_init() != 0) {
         fprintf(stderr, "Failed to initialize server\n");
         return 1;
     }
@@ -49,8 +46,7 @@ int main(void)
     helmet_init(NULL);
     session_init();
 
-    if (db_init() != 0)
-    {
+    if (db_init() != 0) {
         fprintf(stderr, "Database initialization failed.\n");
         return 1;
     }
@@ -60,8 +56,7 @@ int main(void)
 
     server_atexit(destroy_app);
 
-    if (server_listen(port) != 0)
-    {
+    if (server_listen(port) != 0) {
         fprintf(stderr, "Failed to start server\n");
         return 1;
     }

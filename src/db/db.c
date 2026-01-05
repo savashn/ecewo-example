@@ -1,6 +1,6 @@
 #include "ecewo-postgres.h"
 #include "dotenv.h"
-#include <stdlib.h> // for getenv
+#include <stdlib.h>
 
 static PGpool *db_pool = NULL;
 
@@ -53,7 +53,7 @@ static int create_tables(void)
     };
 
     size_t count = sizeof(queries) / sizeof(queries[0]);
-    
+
     for (size_t i = 0; i < count; ++i) {
         PGresult *result = PQexec(conn, queries[i]);
         ExecStatusType status = PQresultStatus(result);
@@ -82,13 +82,24 @@ int db_init(void)
         .user = getenv("DB_USER"),
         .password = getenv("DB_PASSWORD"),
         .pool_size = 10,
-        .acquire_timeout_ms = 5000
+        .timeout_ms = 5000
     };
     
-    db_pool = pg_pool_create(&config);
+    printf("[DB] Config: host=%s port=%s db=%s user=%s\n",
+           config.host ? config.host : "NULL",
+           config.port ? config.port : "NULL",
+           config.dbname ? config.dbname : "NULL",
+           config.user ? config.user : "NULL");
 
+    db_pool = pg_pool_create(&config);
+    
+    if (!db_pool) {
+        fprintf(stderr, "[DB] Failed to create database pool\n");
+        return -1;
+    }
+    
     if (create_tables() != 0) {
-        fprintf(stderr, "Tables couln't be created\n");
+        fprintf(stderr, "[DB] Tables couldn't be created\n");
         return -1;
     }
     
@@ -103,6 +114,7 @@ PGpool *db_get_pool(void)
 void db_cleanup(void)
 {
     if (db_pool) {
+        printf("[DB] Cleaning up database pool\n");
         pg_pool_destroy(db_pool);
         db_pool = NULL;
     }

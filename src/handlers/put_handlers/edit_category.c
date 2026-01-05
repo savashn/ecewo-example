@@ -65,7 +65,6 @@ void edit_category(Req *req, Res *res)
         return;
     }
 
-    // Create context to hold all the data for async operation
     ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
@@ -76,14 +75,6 @@ void edit_category(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        cJSON_Delete(json);
-        free(new_slug);
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
-
     ctx->category = arena_strdup(res->arena, category);
     ctx->original_slug = arena_strdup(res->arena, slug);
     ctx->new_slug = arena_strdup(res->arena, new_slug);
@@ -100,7 +91,7 @@ void edit_category(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -110,18 +101,14 @@ void edit_category(Req *req, Res *res)
     const char *select_sql = "SELECT id, author_id FROM categories WHERE slug = $1";
     const char *params[] = {ctx->original_slug};
 
-    int query_result = pg_query_queue(pg, select_sql, 1, params, on_query_category, ctx);
-    if (query_result != 0)
+    if (pg_query_queue(pg, select_sql, 1, params, on_query_category, ctx) != 0)
     {
-        printf("ERROR: Failed to queue query, result=%d\n", query_result);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pg_query_exec(pg);
-    if (exec_result != 0)
+    if (pg_query_exec(pg) != 0)
     {
-        printf("ERROR: Failed to execute, result=%d\n", exec_result);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -130,12 +117,6 @@ void edit_category(Req *req, Res *res)
 static void on_query_category(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -148,7 +129,6 @@ static void on_query_category(PGquery *pg, PGresult *result, void *data)
 
     if (PQntuples(result) == 0)
     {
-        printf("on_query_category: Category not found\n");
         send_text(ctx->res, 404, "Category not found");
         return;
     }
@@ -166,7 +146,6 @@ static void on_query_category(PGquery *pg, PGresult *result, void *data)
     }
     else
     {
-        // If slug hasn't change, continue to update directly
         update_category(pg, ctx);
     }
 }
@@ -174,12 +153,6 @@ static void on_query_category(PGquery *pg, PGresult *result, void *data)
 static void on_check_new_slug(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -192,7 +165,6 @@ static void on_check_new_slug(PGquery *pg, PGresult *result, void *data)
 
     if (PQntuples(result) > 0)
     {
-        printf("on_check_new_slug: New slug already exists\n");
         send_text(ctx->res, 409, "A category with this title already exists");
         return;
     }
@@ -205,7 +177,7 @@ static void update_category(PGquery *pg, ctx_t *ctx)
     const char *update_params[3] = {
         ctx->category,
         ctx->new_slug,
-        ctx->original_slug // for WHERE condition
+        ctx->original_slug
     };
 
     const char *update_sql =
@@ -226,12 +198,6 @@ static void on_category_updated(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!result)
-    {
-        send_text(ctx->res, 500, "Result is NULL");
-        return;
-    }
-
     ExecStatusType status = PQresultStatus(result);
 
     if (status != PGRES_TUPLES_OK)
@@ -243,7 +209,6 @@ static void on_category_updated(PGquery *pg, PGresult *result, void *data)
 
     if (PQntuples(result) == 0)
     {
-        printf("on_category_updated: No rows affected\n");
         send_text(ctx->res, 404, "Category not found or not updated");
         return;
     }

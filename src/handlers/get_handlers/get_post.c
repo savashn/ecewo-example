@@ -48,7 +48,7 @@ void get_post(Req *req, Res *res)
     ctx->post_slug = post_slug;
     ctx->is_author = auth_ctx->is_author;
 
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -88,15 +88,13 @@ void get_post(Req *req, Res *res)
 
     const char *params[] = {ctx->username, ctx->post_slug};
     
-    int qr = pg_query_queue(pg, select_sql, 2, params, on_query_posts, ctx);
-    if (qr != 0)
+    if (pg_query_queue(pg, select_sql, 2, params, on_query_posts, ctx) != 0)
     {
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pg_query_exec(pg);
-    if (exec_result != 0)
+    if (pg_query_exec(pg) != 0)
     {
         send_text(res, 500, "Failed to execute query");
         return;
@@ -106,12 +104,6 @@ void get_post(Req *req, Res *res)
 static void on_query_posts(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        send_text(ctx->res, NOT_FOUND, "Post not found");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 

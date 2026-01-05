@@ -64,7 +64,6 @@ void create_post(Req *req, Res *res)
 
     int reading_time = compute_reading_time(content);
 
-    // Allocate async context in the response arena
     ctx_t *ctx = arena_alloc(res->arena, sizeof(ctx_t));
     if (!ctx)
     {
@@ -93,11 +92,9 @@ void create_post(Req *req, Res *res)
         return;
     }
 
-    // Initialize defaults for categories
     ctx->category_ids = NULL;
     ctx->category_count = 0;
 
-    // Process categories
     const cJSON *jcategories = cJSON_GetObjectItem(json, "categories");
     if (jcategories && cJSON_IsArray(jcategories))
     {
@@ -130,7 +127,7 @@ void create_post(Req *req, Res *res)
 
     cJSON_Delete(json);
 
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
         send_text(res, 500, "Database connection error");
@@ -140,18 +137,14 @@ void create_post(Req *req, Res *res)
     const char *select_sql = "SELECT 1 FROM posts WHERE slug = $1";
     const char *params[] = {ctx->slug};
 
-    int query_result = pg_query_queue(pg, select_sql, 1, params, on_query_post, ctx);
-    if (query_result != 0)
+    if (pg_query_queue(pg, select_sql, 1, params, on_query_post, ctx) != 0)
     {
-        printf("ERROR: Failed to queue query, result=%d\n", query_result);
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    int exec_result = pg_query_exec(pg);
-    if (exec_result != 0)
+    if (pg_query_exec(pg) != 0)
     {
-        printf("ERROR: Failed to execute, result=%d\n", exec_result);
         send_text(res, 500, "Failed to execute query");
         return;
     }
@@ -160,13 +153,6 @@ void create_post(Req *req, Res *res)
 static void on_query_post(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
-
-    if (!result)
-    {
-        printf("ERROR: Result is NULL\n");
-        send_text(ctx->res, 500, "Result not found");
-        return;
-    }
 
     ExecStatusType status = PQresultStatus(result);
 
@@ -179,13 +165,10 @@ static void on_query_post(PGquery *pg, PGresult *result, void *data)
 
     if (PQntuples(result) > 0)
     {
-        printf("on_query_post: Post with this slug already exists\n");
         send_text(ctx->res, 409, "This post already exists");
         return;
     }
-    printf("on_query_post: No duplicate found, proceeding with insert\n");
 
-    // Prepare parameters for insert
     char *reading_time_str = arena_sprintf(ctx->res->arena, "%d", ctx->reading_time);
     char *created_at_str = arena_sprintf(ctx->res->arena, "%d", ctx->created_at);
     char *updated_at_str = arena_sprintf(ctx->res->arena, "%d", ctx->updated_at);
@@ -205,15 +188,13 @@ static void on_query_post(PGquery *pg, PGresult *result, void *data)
         "INSERT INTO posts "
         "(header, slug, content, reading_time, author_id, created_at, updated_at, is_hidden) "
         "VALUES ($1, $2, $3, $4, $5, to_timestamp($6), to_timestamp($7), $8) "
-        "RETURNING id; ";
+        "RETURNING id;";
 
     if (pg_query_queue(pg, insert_sql, 8, insert_params, on_post_created, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue insert query");
         return;
     }
-
-    printf("on_query_post: Insert operation queued\n");
 }
 
 static void on_post_created(PGquery *pg, PGresult *result, void *data)
@@ -222,7 +203,6 @@ static void on_post_created(PGquery *pg, PGresult *result, void *data)
 
     if (!result || PQresultStatus(result) != PGRES_TUPLES_OK)
     {
-        printf("on_post_created: Post insert failed\n");
         send_text(ctx->res, 500, "DB insert failed");
         return;
     }
@@ -231,7 +211,6 @@ static void on_post_created(PGquery *pg, PGresult *result, void *data)
 
     if (ctx->category_count == 0)
     {
-        // No categories - let completion callback handle success response
         return;
     }
 
@@ -258,15 +237,11 @@ static void on_post_created(PGquery *pg, PGresult *result, void *data)
     }
     strcat(ctx->batch_sql, " ON CONFLICT DO NOTHING;");
 
-    printf("on_post_created: Executing batch SQL: %s\n", ctx->batch_sql);
-
     if (pg_query_queue(pg, ctx->batch_sql, 0, NULL, insert_post_result, ctx) != 0)
     {
         send_text(ctx->res, 500, "Failed to queue batch category insert");
         return;
     }
-
-    printf("on_post_created: Batch category insert queued for %d categories\n", ctx->category_count);
 }
 
 static void insert_post_result(PGquery *pg, PGresult *result, void *data)
@@ -282,6 +257,5 @@ static void insert_post_result(PGquery *pg, PGresult *result, void *data)
         return;
     }
 
-    printf("insert_post_result: Post created successfully with all categories\n");
     send_text(ctx->res, 201, "Post created successfully");
 }

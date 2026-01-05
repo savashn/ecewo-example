@@ -2,7 +2,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-// Callback structure to hold request/response context
 typedef struct
 {
     Res *res;
@@ -10,12 +9,10 @@ typedef struct
 
 static void users_result_callback(PGquery *pg, PGresult *result, void *data);
 
-// Async version of get_all_users
 void get_all_users_async(Req *req, Res *res)
 {
     const char *sql = "SELECT id, name, username FROM users;";
 
-    // Create context to pass to callback
     ctx_t *ctx = arena_alloc(req->arena, sizeof(ctx_t));
     if (!ctx)
     {
@@ -24,54 +21,31 @@ void get_all_users_async(Req *req, Res *res)
     }
 
     ctx->res = res;
-    if (!ctx->res)
-    {
-        send_text(res, 500, "Response copy failed");
-        return;
-    }
 
-    // Create async PostgreSQL context
-    PGquery *pg = pg_query(db_get_pool(), res->arena);
+    PGquery *pg = pg_query_create(db_get_pool(), res->arena);
     if (!pg)
     {
-        printf("get_all_users_async: Failed to create pg_async context\n");
         send_text(res, 500, "Failed to create async context");
         return;
     }
 
-    // Queue the query
-    int result = pg_query_queue(pg, sql, 0, NULL, users_result_callback, ctx);
-    if (result != 0)
+    if (pg_query_queue(pg, sql, 0, NULL, users_result_callback, ctx) != 0)
     {
-        printf("get_all_users_async: Failed to queue query\n");
         send_text(res, 500, "Failed to queue query");
         return;
     }
 
-    // Start execution (this will return immediately)
-    result = pg_query_exec(pg);
-    if (result != 0)
+    if (pg_query_exec(pg) != 0)
     {
-        printf("get_all_users_async: Failed to execute query\n");
         send_text(res, 500, "Failed to execute query");
         return;
     }
-
-    // Function returns here, callback will be called when query completes
 }
 
-// Callback function that processes the query result
 static void users_result_callback(PGquery *pg, PGresult *result, void *data)
 {
     ctx_t *ctx = (ctx_t *)data;
 
-    if (!ctx || !ctx->res)
-    {
-        printf("users_result_callback: Invalid context\n");
-        return;
-    }
-
-    // Check result status
     ExecStatusType status = PQresultStatus(result);
     if (status != PGRES_TUPLES_OK)
     {
@@ -100,9 +74,6 @@ static void users_result_callback(PGquery *pg, PGresult *result, void *data)
     char *json_string = cJSON_PrintUnformatted(json_array);
     send_json(ctx->res, 200, json_string);
 
-    // Cleanup
     cJSON_Delete(json_array);
     free(json_string);
-
-    printf("users_result_callback: Response sent successfully\n");
 }
