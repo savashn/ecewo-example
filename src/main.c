@@ -8,15 +8,24 @@
 #include "middlewares.h"
 #include <stdio.h>
 
+static const char *allowed_origins[] = {
+    "http://localhost:3000"
+};
+
 static const Cors cors = {
-    .origin = "http://localhost:3000",
+    .origins = allowed_origins,
+    .origins_count = 1,
+
     .methods = "GET, POST, OPTIONS",
-    .headers = "Content-Type, Authorization",
-    .credentials = "true",
-    .max_age = "86400",
+    .allowed_headers = "Content-Type, Authorization",
+    .exposed_headers = NULL,
+
+    .credentials = true,
+    .max_age = 86400
 };
 
 void destroy_app(void) {
+    cors_cleanup();
     session_cleanup();
     db_cleanup();
 }

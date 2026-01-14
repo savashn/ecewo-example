@@ -21,11 +21,19 @@ include(FetchContent)
 FetchContent_Declare(
     ecewo
     GIT_REPOSITORY https://github.com/savashn/ecewo.git
-    GIT_TAG v3.0.1
+    GIT_TAG v3.1.0
     GIT_SHALLOW TRUE
 )
 
 FetchContent_MakeAvailable(ecewo)
+
+ecewo_plugins(
+  cookie@v0.1.0
+  session@v0.1.0
+  helmet@v0.1.0
+  cors@v0.1.0
+  postgres@v0.1.0
+)
 
 add_executable(server
     src/main.c
@@ -50,11 +58,6 @@ add_executable(server
     vendors/cJSON.c
     vendors/dotenv.c
     vendors/slugify.c
-    vendors/modules/ecewo-cookie.c
-    vendors/modules/ecewo-cors.c
-    vendors/modules/ecewo-helmet.c
-    vendors/modules/ecewo-postgres.c
-    vendors/modules/ecewo-session.c
 )
 
 target_include_directories(server PRIVATE
@@ -71,7 +74,6 @@ target_include_directories(server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src/utils
     ${CMAKE_CURRENT_SOURCE_DIR}/src/helpers
     ${CMAKE_CURRENT_SOURCE_DIR}/vendors
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendors/modules
 )
 
 if(WIN32 AND TARGET ecewo)
@@ -101,7 +103,6 @@ if(WIN32 AND TARGET ecewo)
     endif()
 endif()
 
-find_package(PostgreSQL REQUIRED)
 find_package(mimalloc CONFIG QUIET)
 
 if(mimalloc_FOUND)
@@ -115,10 +116,6 @@ if(mimalloc_FOUND)
         target_link_libraries(server PRIVATE mimalloc)
     endif()
 endif()
-
-target_include_directories(server PRIVATE
-    ${PostgreSQL_INCLUDE_DIRS}
-)
 
 if(WIN32)
     set(SODIUM_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/vendors/libsodium-win64")
@@ -140,8 +137,12 @@ else()
 endif()
 
 target_link_libraries(server PRIVATE
-    ecewo
-    ${PostgreSQL_LIBRARIES}
+    ecewo::ecewo
+    ecewo::cookie
+    ecewo::session
+    ecewo::cors
+    ecewo::helmet
+    ecewo::postgres
     mimalloc-static
 )
 

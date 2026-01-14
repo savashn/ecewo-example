@@ -38,10 +38,10 @@ void is_auth(Req *req, Res *res, Next next)
 
     if (session)
     {
-        char *id = session_value_get(session, "id");
-        char *name = session_value_get(session, "name");
-        char *username = session_value_get(session, "username");
-        char *is_admin_str = session_value_get(session, "is_admin");
+        char *id = session_value_get(session, "id", req->arena);
+        char *name = session_value_get(session, "name", req->arena);
+        char *username = session_value_get(session, "username", req->arena);
+        char *is_admin_str = session_value_get(session, "is_admin", req->arena);
 
         if (!id || !name || !username)
         {
